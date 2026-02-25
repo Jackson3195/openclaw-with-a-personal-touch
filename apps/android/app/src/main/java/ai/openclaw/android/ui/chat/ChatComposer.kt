@@ -5,7 +5,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -162,7 +161,6 @@ fun ChatComposer(
           label = "Refresh",
           icon = Icons.Default.Refresh,
           enabled = true,
-          compact = true,
           onClick = onRefresh,
         )
 
@@ -170,7 +168,6 @@ fun ChatComposer(
           label = "Abort",
           icon = Icons.Default.Stop,
           enabled = pendingRunCount > 0,
-          compact = true,
           onClick = onAbort,
         )
       }
@@ -199,12 +196,7 @@ fun ChatComposer(
           Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(16.dp))
         }
         Spacer(modifier = Modifier.width(8.dp))
-        Text(
-          text = "Send",
-          style = mobileHeadline.copy(fontWeight = FontWeight.Bold),
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-        )
+        Text("Send", style = mobileHeadline.copy(fontWeight = FontWeight.Bold))
       }
     }
   }
@@ -215,13 +207,12 @@ private fun SecondaryActionButton(
   label: String,
   icon: androidx.compose.ui.graphics.vector.ImageVector,
   enabled: Boolean,
-  compact: Boolean = false,
   onClick: () -> Unit,
 ) {
   Button(
     onClick = onClick,
     enabled = enabled,
-    modifier = if (compact) Modifier.size(44.dp) else Modifier.height(44.dp),
+    modifier = Modifier.height(44.dp),
     shape = RoundedCornerShape(14.dp),
     colors =
       ButtonDefaults.buttonColors(
@@ -231,17 +222,15 @@ private fun SecondaryActionButton(
         disabledContentColor = mobileTextTertiary,
       ),
     border = BorderStroke(1.dp, mobileBorderStrong),
-    contentPadding = if (compact) PaddingValues(0.dp) else ButtonDefaults.ContentPadding,
+    contentPadding = ButtonDefaults.ContentPadding,
   ) {
     Icon(icon, contentDescription = label, modifier = Modifier.size(14.dp))
-    if (!compact) {
-      Spacer(modifier = Modifier.width(5.dp))
-      Text(
-        text = label,
-        style = mobileCallout.copy(fontWeight = FontWeight.SemiBold),
-        color = if (enabled) mobileTextSecondary else mobileTextTertiary,
-      )
-    }
+    Spacer(modifier = Modifier.width(5.dp))
+    Text(
+      text = label,
+      style = mobileCallout.copy(fontWeight = FontWeight.SemiBold),
+      color = if (enabled) mobileTextSecondary else mobileTextTertiary,
+    )
   }
 }
 
