@@ -95,6 +95,7 @@ USER.md
 /local/
 package-lock.json
 .claude/settings.local.json
+.claude/skills
 .agents/
 .agents
 .agent/
