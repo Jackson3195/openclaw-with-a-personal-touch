@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { MessageDb } from "../db.js";
-import { createMessageRepository } from "../message-repository.js";
-import type { StoredMessage } from "../types.js";
+import type { MessageDb } from "../../db.js";
+import type { StoredMessage } from "../../types.js";
+import { MessageRepositoryImpl } from "../message-repository.js";
 
 // Stub MessageDb that tracks calls
 function createMockDb(rows: StoredMessage[] = []): MessageDb {
@@ -43,7 +43,7 @@ describe("MessageRepository", () => {
   });
 
   it("returns messages for a conversation with default limit", () => {
-    const repo = createMessageRepository(mockDb);
+    const repo = new MessageRepositoryImpl(mockDb);
     const result = repo.getConversation("chat-1");
 
     expect(mockDb.getConversationContext).toHaveBeenCalledWith("chat-1", 50);
@@ -51,7 +51,7 @@ describe("MessageRepository", () => {
   });
 
   it("respects custom limit option", () => {
-    const repo = createMessageRepository(mockDb);
+    const repo = new MessageRepositoryImpl(mockDb);
     repo.getConversation("chat-1", { limit: 10 });
 
     expect(mockDb.getConversationContext).toHaveBeenCalledWith("chat-1", 10);
@@ -59,7 +59,7 @@ describe("MessageRepository", () => {
 
   it("returns empty array for unknown conversation", () => {
     const emptyDb = createMockDb([]);
-    const repo = createMessageRepository(emptyDb);
+    const repo = new MessageRepositoryImpl(emptyDb);
     const result = repo.getConversation("unknown-chat");
 
     expect(result).toEqual([]);
