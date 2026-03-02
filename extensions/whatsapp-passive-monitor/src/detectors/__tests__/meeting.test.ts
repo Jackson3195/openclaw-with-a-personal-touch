@@ -28,6 +28,7 @@ const sampleMessages: StoredMessage[] = [
 ];
 
 const createMockRepo = (messages: StoredMessage[] = sampleMessages): MessageRepository => ({
+  insertMessage: vi.fn(),
   getConversation: vi.fn().mockReturnValue(messages),
 });
 

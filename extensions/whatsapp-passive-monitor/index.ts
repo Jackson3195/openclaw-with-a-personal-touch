@@ -1,6 +1,10 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { createMessageDb, type MessageDb } from "./src/db.js";
 import { createDebounceManager, type DebounceManager } from "./src/debounce.js";
+import {
+  MessageRepositoryImpl,
+  type MessageRepository,
+} from "./src/repository/message-repository.js";
+import { SqliteRepositoryImpl } from "./src/repository/sqlite-repository.js";
 import { DEFAULT_CONFIG, type PluginConfig } from "./src/types.js";
 
 export default function register(api: OpenClawPluginApi) {
@@ -10,9 +14,10 @@ export default function register(api: OpenClawPluginApi) {
   // Resolve DB path relative to openclaw workspace
   const resolvedDbPath = api.resolvePath(`~/.openclaw/workspace/${config.dbPath}`);
 
-  let db: MessageDb;
+  let messageRepo: MessageRepository;
   try {
-    db = createMessageDb(resolvedDbPath);
+    const sqliteRepo = new SqliteRepositoryImpl(resolvedDbPath);
+    messageRepo = new MessageRepositoryImpl(sqliteRepo);
   } catch (err) {
     api.logger.error?.(`whatsapp-passive-monitor: failed to open SQLite: ${String(err)}`);
     return;
@@ -20,7 +25,9 @@ export default function register(api: OpenClawPluginApi) {
 
   // Debounce callback — placeholder for Part 3/4 (detector pipeline)
   const onDebouncefire = (conversationId: string) => {
-    const messages = db.getConversationContext(conversationId, config.contextMessageLimit);
+    const messages = messageRepo.getConversation(conversationId, {
+      limit: config.contextMessageLimit,
+    });
     api.logger.info?.(
       `whatsapp-passive-monitor: debounce fired for ${conversationId}, ${messages.length} messages in context`,
     );
@@ -36,7 +43,7 @@ export default function register(api: OpenClawPluginApi) {
   api.on("message_observed", async (event, ctx) => {
     if (ctx.channelId !== "whatsapp") return;
 
-    db.insertMessage({
+    messageRepo.insertMessage({
       conversation_id: ctx.conversationId ?? event.from,
       sender: event.fromMe ? "me" : event.from,
       sender_name: event.fromMe ? null : ((event.metadata?.pushName as string) ?? null),
