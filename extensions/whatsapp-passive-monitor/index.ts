@@ -16,7 +16,7 @@ const DEFAULT_CONFIG: PluginConfig = {
   ollamaUrl: "http://localhost:11434",
   model: "llama3.1:8b",
   debounceMs: 5000,
-  cooldownMs: 300000,
+
   contextMessageLimit: 20,
   dbPath: "passive/messages.db",
   outputDir: "passive",

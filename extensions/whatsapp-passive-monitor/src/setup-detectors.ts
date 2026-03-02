@@ -6,14 +6,14 @@ import type { OllamaRepository } from "./repository/ollama-repository.ts";
 
 // Initializes all detectors and registers them in a DetectorRegistry.
 // Repos are passed in since they need runtime config.
-export const setupDetectors = (repos: {
+export const setupDetectors = (deps: {
   messageRepo: MessageRepository;
   ollama: OllamaRepository;
   agentRepo: AgentRepository;
 }) => {
   const registry = createDetectorRegistry();
 
-  registry.add(meetingDetector(repos));
+  registry.add(meetingDetector(deps));
   // Future: registry.add(eventDetector({ ... }));
 
   return registry;

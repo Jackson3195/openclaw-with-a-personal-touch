@@ -15,7 +15,6 @@ export type PluginConfig = {
   ollamaUrl: string;
   model: string;
   debounceMs: number;
-  cooldownMs: number;
   contextMessageLimit: number;
   dbPath: string;
   outputDir: string;
