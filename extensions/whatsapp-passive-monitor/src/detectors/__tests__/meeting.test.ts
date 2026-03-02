@@ -185,7 +185,7 @@ describe("meetingDetector", () => {
     expect(prompt).toContain("You: Sure, 2pm works");
   });
 
-  it("agent prompt instructs to confirm and offer to create event", async () => {
+  it("agent prompt prefers calendar-guard skill with manual fallback", async () => {
     const repo = createMockRepo();
     const ollama = createMockOllama({ meetingDetected: true });
     const agentRepo = createMockAgentRepo();
@@ -195,6 +195,7 @@ describe("meetingDetector", () => {
     await execute({ conversationId: "chat-1" });
 
     const prompt = (agentRepo.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(prompt).toContain("calendar-guard");
     expect(prompt).toContain("calendar event");
     expect(prompt).toContain("summary");
   });

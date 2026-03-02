@@ -89,7 +89,9 @@ Respond with JSON only: {"meetingDetected": true or false}`;
   const buildAgentPrompt = (conversation: string): string =>
     `A local classifier has flagged the following WhatsApp conversation as containing arrangements to meet up in person. Please review it carefully.
 
-If the participants are genuinely arranging to meet in person, ask me if I'd like to create a calendar event. Provide a brief summary including who is meeting, when, and where (if mentioned).
+If the participants are genuinely arranging to meet in person:
+- If the calendar-guard skill is available, use it process this event.
+- Otherwise, ask me if I'd like to create a calendar event. Provide a brief summary including who is meeting, when, and where (if mentioned).
 
 If you determine this is NOT actually an arrangement to meet in person, do nothing.
 
