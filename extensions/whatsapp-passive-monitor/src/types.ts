@@ -10,6 +10,13 @@ export type StoredMessage = {
   channel_id: string;
 };
 
+// Minimal logger type — compatible with PluginLogger from openclaw/plugin-sdk
+export type Logger = {
+  info: (message: string) => void;
+  warn: (message: string) => void;
+  error: (message: string) => void;
+};
+
 // Plugin configuration with defaults
 export type PluginConfig = {
   ollamaUrl: string;

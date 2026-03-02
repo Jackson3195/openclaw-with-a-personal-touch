@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import type { AgentRepository } from "../../repository/agent-repository.ts";
 import type { MessageRepository } from "../../repository/message-repository.ts";
 import type { OllamaRepository } from "../../repository/ollama-repository.ts";
-import type { StoredMessage } from "../../types.ts";
+import type { Logger, StoredMessage } from "../../types.ts";
 import { meetingDetector } from "../meeting.ts";
 
 const sampleMessages: StoredMessage[] = [
@@ -41,6 +41,12 @@ const createMockAgentRepo = (success = true): AgentRepository => ({
   send: vi.fn().mockResolvedValue({ success, error: success ? undefined : "agent error" }),
 });
 
+const createMockLogger = (): Logger => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+});
+
 describe("meetingDetector", () => {
   // --- Ollama classification ---
 
@@ -48,8 +54,9 @@ describe("meetingDetector", () => {
     const repo = createMockRepo();
     const ollama = createMockOllama({ meetingDetected: false });
     const agentRepo = createMockAgentRepo();
+    const logger = createMockLogger();
 
-    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo, logger });
     await execute({ conversationId: "chat-1" });
 
     expect(repo.getConversation).toHaveBeenCalledWith("chat-1", { limit: 20 });
@@ -59,8 +66,9 @@ describe("meetingDetector", () => {
     const repo = createMockRepo();
     const ollama = createMockOllama({ meetingDetected: false });
     const agentRepo = createMockAgentRepo();
+    const logger = createMockLogger();
 
-    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo, logger });
     await execute({ conversationId: "chat-1" });
 
     const call = (ollama.generate as ReturnType<typeof vi.fn>).mock.calls[0][0];
@@ -72,8 +80,9 @@ describe("meetingDetector", () => {
     const repo = createMockRepo();
     const ollama = createMockOllama({ meetingDetected: false });
     const agentRepo = createMockAgentRepo();
+    const logger = createMockLogger();
 
-    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo, logger });
     await execute({ conversationId: "chat-1" });
 
     const call = (ollama.generate as ReturnType<typeof vi.fn>).mock.calls[0][0];
@@ -88,8 +97,9 @@ describe("meetingDetector", () => {
     const repo = createMockRepo();
     const ollama = createMockOllama({ meetingDetected: false });
     const agentRepo = createMockAgentRepo();
+    const logger = createMockLogger();
 
-    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo, logger });
     await execute({ conversationId: "chat-1" });
 
     const call = (ollama.generate as ReturnType<typeof vi.fn>).mock.calls[0][0];
@@ -113,8 +123,9 @@ describe("meetingDetector", () => {
     const repo = createMockRepo();
     const ollama = createMockOllama({ meetingDetected: false });
     const agentRepo = createMockAgentRepo();
+    const logger = createMockLogger();
 
-    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo, logger });
     const result = await execute({ conversationId: "chat-1" });
 
     expect(result.meetingDetected).toBe(false);
@@ -125,8 +136,9 @@ describe("meetingDetector", () => {
     const repo = createMockRepo();
     const ollama = createMockOllama(null);
     const agentRepo = createMockAgentRepo();
+    const logger = createMockLogger();
 
-    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo, logger });
     const result = await execute({ conversationId: "chat-1" });
 
     expect(result.meetingDetected).toBe(false);
@@ -137,8 +149,9 @@ describe("meetingDetector", () => {
     const repo = createMockRepo();
     const ollama = createMockOllama({ meetingDetected: false });
     const agentRepo = createMockAgentRepo();
+    const logger = createMockLogger();
 
-    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo, logger });
     await execute({ conversationId: "chat-1" });
 
     expect(agentRepo.send).not.toHaveBeenCalled();
@@ -150,8 +163,9 @@ describe("meetingDetector", () => {
     const repo = createMockRepo();
     const ollama = createMockOllama({ meetingDetected: true });
     const agentRepo = createMockAgentRepo();
+    const logger = createMockLogger();
 
-    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo, logger });
     await execute({ conversationId: "chat-1" });
 
     expect(agentRepo.send).toHaveBeenCalledOnce();
@@ -161,8 +175,9 @@ describe("meetingDetector", () => {
     const repo = createMockRepo();
     const ollama = createMockOllama({ meetingDetected: true });
     const agentRepo = createMockAgentRepo();
+    const logger = createMockLogger();
 
-    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo, logger });
     await execute({ conversationId: "chat-1" });
 
     const prompt = (agentRepo.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
@@ -174,8 +189,9 @@ describe("meetingDetector", () => {
     const repo = createMockRepo();
     const ollama = createMockOllama({ meetingDetected: true });
     const agentRepo = createMockAgentRepo();
+    const logger = createMockLogger();
 
-    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo, logger });
     await execute({ conversationId: "chat-1" });
 
     const prompt = (agentRepo.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
@@ -187,8 +203,9 @@ describe("meetingDetector", () => {
     const repo = createMockRepo();
     const ollama = createMockOllama({ meetingDetected: true });
     const agentRepo = createMockAgentRepo(true);
+    const logger = createMockLogger();
 
-    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo, logger });
     const result = await execute({ conversationId: "chat-1" });
 
     expect(result.meetingDetected).toBe(true);
@@ -199,8 +216,9 @@ describe("meetingDetector", () => {
     const repo = createMockRepo();
     const ollama = createMockOllama({ meetingDetected: true });
     const agentRepo = createMockAgentRepo(false);
+    const logger = createMockLogger();
 
-    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo, logger });
     const result = await execute({ conversationId: "chat-1" });
 
     expect(result.meetingDetected).toBe(true);

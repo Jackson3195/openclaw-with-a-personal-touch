@@ -43,7 +43,7 @@ export default function register(api: OpenClawPluginApi) {
   const agentRepo = new AgentRepositoryImpl(runPluginCommandWithTimeout);
 
   // Initialize all detectors and register them
-  const registry = setupDetectors({ messageRepo, ollama, agentRepo });
+  const registry = setupDetectors({ messageRepo, ollama, agentRepo, logger: api.logger });
 
   // Debounce fires → run all detectors sequentially
   const onDebouncefire = (conversationId: string) => {

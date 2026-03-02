@@ -2,12 +2,13 @@ import type { Detector } from "../interfaces/detector.ts";
 import type { AgentRepository } from "../repository/agent-repository.ts";
 import type { MessageRepository } from "../repository/message-repository.ts";
 import type { OllamaRepository } from "../repository/ollama-repository.ts";
-import type { StoredMessage } from "../types.ts";
+import type { Logger, StoredMessage } from "../types.ts";
 
 export type MeetingDetectorDeps = {
   messageRepo: MessageRepository;
   ollama: OllamaRepository;
   agentRepo: AgentRepository;
+  logger: Logger;
 };
 
 export type MeetingDetectorResult = {
@@ -95,7 +96,7 @@ If you determine this is NOT actually an arrangement to meet in person, do nothi
 --- Conversation ---
 ${conversation}`;
 
-  const { messageRepo, ollama, agentRepo } = deps;
+  const { messageRepo, ollama, agentRepo, logger } = deps;
 
   return async (ctx) => {
     const { conversationId } = ctx;
@@ -113,7 +114,7 @@ ${conversation}`;
 
     // No meeting detected — log and return
     if (!meetingDetected) {
-      console.log(`meeting-detector: no meeting detected for ${conversationId}`);
+      logger.info(`meeting-detector: no meeting detected for ${conversationId}`);
       return { meetingDetected: false, agentNotified: false };
     }
 

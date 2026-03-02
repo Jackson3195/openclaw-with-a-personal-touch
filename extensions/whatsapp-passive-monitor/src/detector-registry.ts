@@ -1,4 +1,5 @@
 import type { DetectorExecCtx } from "./interfaces/detector.ts";
+import type { Logger } from "./types.ts";
 
 type DetectorExecutor = (ctx: DetectorExecCtx) => Promise<unknown>;
 
@@ -9,7 +10,7 @@ export type DetectorRegistry = {
   runAll: (ctx: DetectorExecCtx) => Promise<void>;
 };
 
-export const createDetectorRegistry = (): DetectorRegistry => {
+export const createDetectorRegistry = (logger: Logger): DetectorRegistry => {
   const detectors: DetectorExecutor[] = [];
 
   return {
@@ -21,7 +22,7 @@ export const createDetectorRegistry = (): DetectorRegistry => {
         try {
           await detector(ctx);
         } catch (err) {
-          console.error(`detector-registry: detector failed: ${String(err)}`);
+          logger.error(`detector-registry: detector failed: ${String(err)}`);
         }
       }
     },
