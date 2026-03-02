@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
+import type { AgentRepository } from "../../repository/agent-repository.ts";
 import type { MessageRepository } from "../../repository/message-repository.ts";
 import type { OllamaRepository } from "../../repository/ollama-repository.ts";
 import type { StoredMessage } from "../../types.ts";
-import { createMeetingDetector } from "../meeting.ts";
+import { meetingDetector } from "../meeting.ts";
 
 const sampleMessages: StoredMessage[] = [
   {
@@ -36,32 +37,19 @@ const createMockOllama = (result: unknown = null): OllamaRepository => ({
   generate: vi.fn().mockResolvedValue(result),
 });
 
+const createMockAgentRepo = (success = true): AgentRepository => ({
+  send: vi.fn().mockResolvedValue({ success, error: success ? undefined : "agent error" }),
+});
+
 describe("meetingDetector", () => {
-  it("returns meetingDetected: true when Ollama detects a meeting", async () => {
-    const repo = createMockRepo();
-    const ollama = createMockOllama({ meetingDetected: true });
+  // --- Ollama classification ---
 
-    const execute = createMeetingDetector({ messageRepo: repo, ollama });
-    const result = await execute({ conversationId: "chat-1" });
-
-    expect(result.meetingDetected).toBe(true);
-  });
-
-  it("returns meetingDetected: false when Ollama does not detect a meeting", async () => {
+  it("queries the message repository with conversationId and limit 20", async () => {
     const repo = createMockRepo();
     const ollama = createMockOllama({ meetingDetected: false });
+    const agentRepo = createMockAgentRepo();
 
-    const execute = createMeetingDetector({ messageRepo: repo, ollama });
-    const result = await execute({ conversationId: "chat-1" });
-
-    expect(result.meetingDetected).toBe(false);
-  });
-
-  it("queries the message repository with conversationId", async () => {
-    const repo = createMockRepo();
-    const ollama = createMockOllama();
-
-    const execute = createMeetingDetector({ messageRepo: repo, ollama });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
     await execute({ conversationId: "chat-1" });
 
     expect(repo.getConversation).toHaveBeenCalledWith("chat-1", { limit: 20 });
@@ -69,12 +57,12 @@ describe("meetingDetector", () => {
 
   it("embeds formatted conversation in the Ollama prompt", async () => {
     const repo = createMockRepo();
-    const ollama = createMockOllama();
+    const ollama = createMockOllama({ meetingDetected: false });
+    const agentRepo = createMockAgentRepo();
 
-    const execute = createMeetingDetector({ messageRepo: repo, ollama });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
     await execute({ conversationId: "chat-1" });
 
-    // Verify the prompt passed to ollama.generate contains formatted messages
     const call = (ollama.generate as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(call.prompt).toContain("Alice: Hey are you free Saturday?");
     expect(call.prompt).toContain("You: Sure, 2pm works");
@@ -82,9 +70,10 @@ describe("meetingDetector", () => {
 
   it("sends structured output format to Ollama", async () => {
     const repo = createMockRepo();
-    const ollama = createMockOllama();
+    const ollama = createMockOllama({ meetingDetected: false });
+    const agentRepo = createMockAgentRepo();
 
-    const execute = createMeetingDetector({ messageRepo: repo, ollama });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
     await execute({ conversationId: "chat-1" });
 
     const call = (ollama.generate as ReturnType<typeof vi.fn>).mock.calls[0][0];
@@ -97,9 +86,10 @@ describe("meetingDetector", () => {
 
   it("prompt contains all 7 classification rules", async () => {
     const repo = createMockRepo();
-    const ollama = createMockOllama();
+    const ollama = createMockOllama({ meetingDetected: false });
+    const agentRepo = createMockAgentRepo();
 
-    const execute = createMeetingDetector({ messageRepo: repo, ollama });
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
     await execute({ conversationId: "chat-1" });
 
     const call = (ollama.generate as ReturnType<typeof vi.fn>).mock.calls[0][0];
@@ -117,13 +107,103 @@ describe("meetingDetector", () => {
     }
   });
 
-  it("returns meetingDetected: false when Ollama returns null", async () => {
-    const repo = createMockRepo();
-    const ollama = createMockOllama(null);
+  // --- No meeting detected ---
 
-    const execute = createMeetingDetector({ messageRepo: repo, ollama });
+  it("returns meetingDetected: false when Ollama does not detect a meeting", async () => {
+    const repo = createMockRepo();
+    const ollama = createMockOllama({ meetingDetected: false });
+    const agentRepo = createMockAgentRepo();
+
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
     const result = await execute({ conversationId: "chat-1" });
 
     expect(result.meetingDetected).toBe(false);
+    expect(result.agentNotified).toBe(false);
+  });
+
+  it("returns meetingDetected: false when Ollama returns null", async () => {
+    const repo = createMockRepo();
+    const ollama = createMockOllama(null);
+    const agentRepo = createMockAgentRepo();
+
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    const result = await execute({ conversationId: "chat-1" });
+
+    expect(result.meetingDetected).toBe(false);
+    expect(result.agentNotified).toBe(false);
+  });
+
+  it("does not call agentRepo.send when Ollama returns false", async () => {
+    const repo = createMockRepo();
+    const ollama = createMockOllama({ meetingDetected: false });
+    const agentRepo = createMockAgentRepo();
+
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    await execute({ conversationId: "chat-1" });
+
+    expect(agentRepo.send).not.toHaveBeenCalled();
+  });
+
+  // --- Meeting detected → agent notification ---
+
+  it("calls agentRepo.send when Ollama detects a meeting", async () => {
+    const repo = createMockRepo();
+    const ollama = createMockOllama({ meetingDetected: true });
+    const agentRepo = createMockAgentRepo();
+
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    await execute({ conversationId: "chat-1" });
+
+    expect(agentRepo.send).toHaveBeenCalledOnce();
+  });
+
+  it("agent prompt contains the formatted conversation", async () => {
+    const repo = createMockRepo();
+    const ollama = createMockOllama({ meetingDetected: true });
+    const agentRepo = createMockAgentRepo();
+
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    await execute({ conversationId: "chat-1" });
+
+    const prompt = (agentRepo.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(prompt).toContain("Alice: Hey are you free Saturday?");
+    expect(prompt).toContain("You: Sure, 2pm works");
+  });
+
+  it("agent prompt instructs to confirm and offer to create event", async () => {
+    const repo = createMockRepo();
+    const ollama = createMockOllama({ meetingDetected: true });
+    const agentRepo = createMockAgentRepo();
+
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    await execute({ conversationId: "chat-1" });
+
+    const prompt = (agentRepo.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(prompt).toContain("calendar event");
+    expect(prompt).toContain("summary");
+  });
+
+  it("returns agentNotified: true when agent send succeeds", async () => {
+    const repo = createMockRepo();
+    const ollama = createMockOllama({ meetingDetected: true });
+    const agentRepo = createMockAgentRepo(true);
+
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    const result = await execute({ conversationId: "chat-1" });
+
+    expect(result.meetingDetected).toBe(true);
+    expect(result.agentNotified).toBe(true);
+  });
+
+  it("returns agentNotified: false when agent send fails", async () => {
+    const repo = createMockRepo();
+    const ollama = createMockOllama({ meetingDetected: true });
+    const agentRepo = createMockAgentRepo(false);
+
+    const execute = meetingDetector({ messageRepo: repo, ollama, agentRepo });
+    const result = await execute({ conversationId: "chat-1" });
+
+    expect(result.meetingDetected).toBe(true);
+    expect(result.agentNotified).toBe(false);
   });
 });

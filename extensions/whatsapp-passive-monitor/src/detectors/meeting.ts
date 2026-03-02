@@ -1,4 +1,5 @@
 import type { Detector } from "../interfaces/detector.ts";
+import type { AgentRepository } from "../repository/agent-repository.ts";
 import type { MessageRepository } from "../repository/message-repository.ts";
 import type { OllamaRepository } from "../repository/ollama-repository.ts";
 import type { StoredMessage } from "../types.ts";
@@ -6,20 +7,20 @@ import type { StoredMessage } from "../types.ts";
 export type MeetingDetectorDeps = {
   messageRepo: MessageRepository;
   ollama: OllamaRepository;
+  agentRepo: AgentRepository;
 };
 
 export type MeetingDetectorResult = {
   meetingDetected: boolean;
+  agentNotified: boolean;
 };
 
 /**
  * Meeting detector command.
- * Queries the message repository for the last 20 messages, formats them,
- * sends to Ollama for classification, and returns the result.
+ * Queries the message repository for the last 20 messages, classifies via Ollama,
+ * and escalates positive detections to the main agent for confirmation.
  */
-export const createMeetingDetector: Detector<MeetingDetectorDeps, MeetingDetectorResult> = (
-  deps,
-) => {
+export const meetingDetector: Detector<MeetingDetectorDeps, MeetingDetectorResult> = (deps) => {
   // Structured output schema — Ollama guarantees the response matches this shape
   const MEETING_FORMAT = {
     type: "object",
@@ -54,7 +55,7 @@ export const createMeetingDetector: Detector<MeetingDetectorDeps, MeetingDetecto
       .join("\n");
 
   /**
-   * Build the complete classification prompt with conversation embedded.
+   * Build the Ollama classification prompt with conversation embedded.
    * v3 prompt — 97% accuracy with llama3.1:8b (7 rules)
    */
   const buildPrompt = (conversation: string): string =>
@@ -74,7 +75,21 @@ ${conversation}
 
 Respond with JSON only: {"meetingDetected": true or false}`;
 
-  const { messageRepo, ollama } = deps;
+  /**
+   * Build the prompt sent to the main agent when Ollama detects a meeting.
+   * The agent double-checks the conversation and asks the user about creating a calendar event.
+   */
+  const buildAgentPrompt = (conversation: string): string =>
+    `A local classifier has flagged the following WhatsApp conversation as containing arrangements to meet up in person. Please review it carefully.
+
+If the participants are genuinely arranging to meet in person, ask me if I'd like to create a calendar event. Provide a brief summary including who is meeting, when, and where (if mentioned).
+
+If you determine this is NOT actually an arrangement to meet in person, do nothing.
+
+--- Conversation ---
+${conversation}`;
+
+  const { messageRepo, ollama, agentRepo } = deps;
 
   return async (ctx) => {
     const { conversationId } = ctx;
@@ -88,6 +103,18 @@ Respond with JSON only: {"meetingDetected": true or false}`;
       format: MEETING_FORMAT,
     });
 
-    return { meetingDetected: result?.meetingDetected === true };
+    const meetingDetected = result?.meetingDetected === true;
+
+    // No meeting detected — log and return
+    if (!meetingDetected) {
+      console.log(`meeting-detector: no meeting detected for ${conversationId}`);
+      return { meetingDetected: false, agentNotified: false };
+    }
+
+    // Meeting detected — escalate to main agent for confirmation
+    const agentPrompt = buildAgentPrompt(conversation);
+    const agentResult = await agentRepo.send(agentPrompt);
+
+    return { meetingDetected: true, agentNotified: agentResult.success };
   };
 };
