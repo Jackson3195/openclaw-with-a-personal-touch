@@ -23,8 +23,8 @@ const DEFAULT_CONFIG: PluginConfig = {
 };
 
 export default function register(api: OpenClawPluginApi) {
-  const raw = (api.pluginConfig ?? {}) as Partial<PluginConfig>;
-  const config: PluginConfig = { ...DEFAULT_CONFIG, ...raw };
+  // TODO: Expose plugin via openclaw plugin in the future
+  const config: PluginConfig = { ...DEFAULT_CONFIG };
 
   // Resolve DB path relative to openclaw workspace
   const resolvedDbPath = api.resolvePath(`~/.openclaw/workspace/${config.dbPath}`);
