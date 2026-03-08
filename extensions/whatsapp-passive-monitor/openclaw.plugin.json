@@ -5,7 +5,7 @@
   "hooks": ["message_observed"],
   "configSchema": {
     "type": "object",
-    "additionalProperties": false,
+    "additionalProperties": true,
     "properties": {
       "ollamaUrl": {
         "type": "string"
