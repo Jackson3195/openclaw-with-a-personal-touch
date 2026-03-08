@@ -8,25 +8,24 @@
     "additionalProperties": false,
     "properties": {
       "ollamaUrl": {
-        "type": "string"
-      },
-      "model": {
-        "type": "string"
+        "type": "string",
+        "default": "http://localhost:11434"
       },
       "debounceMs": {
-        "type": "number"
-      },
-      "cooldownMs": {
-        "type": "number"
-      },
-      "contextMessageLimit": {
-        "type": "number"
+        "type": "number",
+        "default": 5000
       },
       "dbPath": {
-        "type": "string"
+        "type": "string",
+        "default": "passive/messages.db"
       },
       "outputDir": {
-        "type": "string"
+        "type": "string",
+        "default": "passive"
+      },
+      "detectMeetings": {
+        "type": "boolean",
+        "default": false
       }
     }
   },
@@ -35,21 +34,9 @@
       "label": "Ollama URL",
       "help": "URL of the Ollama API (default: http://localhost:11434)"
     },
-    "model": {
-      "label": "Model",
-      "help": "Ollama model for classification (default: llama3.1:8b)"
-    },
     "debounceMs": {
       "label": "Debounce (ms)",
       "help": "Silence period before classifying a conversation (default: 5000)"
-    },
-    "cooldownMs": {
-      "label": "Cooldown (ms)",
-      "help": "Minimum time between triggers for the same detector (default: 300000)"
-    },
-    "contextMessageLimit": {
-      "label": "Context Limit",
-      "help": "Max messages to include in classifier context (default: 20)"
     },
     "dbPath": {
       "label": "Database Path",
@@ -58,6 +45,10 @@
     "outputDir": {
       "label": "Output Directory",
       "help": "Relative path for classification logs (default: passive)"
+    },
+    "detectMeetings": {
+      "label": "Detect Meetings",
+      "help": "Enable LLM-based meeting detection pipeline (default: true). When false, messages are stored but not classified."
     }
   }
 }

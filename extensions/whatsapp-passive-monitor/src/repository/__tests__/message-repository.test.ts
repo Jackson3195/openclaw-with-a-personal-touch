@@ -2,41 +2,38 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { createMessageDb, type MessageDb } from "../db.js";
+import { MessageRepositoryImpl, type MessageRepository } from "../message-repository.js";
+import { SqliteRepositoryImpl, type SqliteRepository } from "../sqlite-repository.js";
 
-describe("MessageDb", () => {
+describe("MessageRepository", () => {
   let tmpDir: string;
-  let dbPath: string;
-  let db: MessageDb;
+  let sqliteRepo: SqliteRepository;
+  let repo: MessageRepository;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wpm-db-test-"));
-    dbPath = path.join(tmpDir, "messages.db");
-    db = createMessageDb(dbPath);
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wpm-msg-repo-test-"));
+    const dbPath = path.join(tmpDir, "messages.db");
+    sqliteRepo = new SqliteRepositoryImpl(dbPath);
+    repo = new MessageRepositoryImpl(sqliteRepo);
   });
 
   afterEach(() => {
-    db.close();
+    sqliteRepo.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   // ---- Schema creation ----
 
-  it("creates the database and schema on init", () => {
-    // DB file should exist after creation
-    expect(fs.existsSync(dbPath)).toBe(true);
-  });
-
-  it("is idempotent — opening the same path twice does not error", () => {
-    db.close();
-    // Re-open on same path and assign to db so afterEach closes it
-    db = createMessageDb(dbPath);
+  it("creates the messages table on init (idempotent)", () => {
+    // Re-creating on same DB should not error
+    const repo2 = new MessageRepositoryImpl(sqliteRepo);
+    expect(repo2).toBeDefined();
   });
 
   // ---- Insert ----
 
   it("inserts an inbound message", () => {
-    db.insertMessage({
+    repo.insertMessage({
       conversation_id: "447123456789@s.whatsapp.net",
       sender: "447123456789",
       sender_name: "Alice",
@@ -46,7 +43,7 @@ describe("MessageDb", () => {
       channel_id: "whatsapp",
     });
 
-    const messages = db.getConversationContext("447123456789@s.whatsapp.net", 10);
+    const messages = repo.getConversation("447123456789@s.whatsapp.net");
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe("Hey, are you free Saturday?");
     expect(messages[0].direction).toBe("inbound");
@@ -54,7 +51,7 @@ describe("MessageDb", () => {
   });
 
   it("inserts an outbound message", () => {
-    db.insertMessage({
+    repo.insertMessage({
       conversation_id: "447123456789@s.whatsapp.net",
       sender: "me",
       sender_name: null,
@@ -64,7 +61,7 @@ describe("MessageDb", () => {
       channel_id: "whatsapp",
     });
 
-    const messages = db.getConversationContext("447123456789@s.whatsapp.net", 10);
+    const messages = repo.getConversation("447123456789@s.whatsapp.net");
     expect(messages).toHaveLength(1);
     expect(messages[0].direction).toBe("outbound");
     expect(messages[0].sender_name).toBeNull();
@@ -74,7 +71,7 @@ describe("MessageDb", () => {
 
   it("returns messages in chronological order (oldest first)", () => {
     // Insert in reverse order to verify sorting
-    db.insertMessage({
+    repo.insertMessage({
       conversation_id: "chat-1",
       sender: "bob",
       sender_name: "Bob",
@@ -83,7 +80,7 @@ describe("MessageDb", () => {
       direction: "inbound",
       channel_id: "whatsapp",
     });
-    db.insertMessage({
+    repo.insertMessage({
       conversation_id: "chat-1",
       sender: "me",
       sender_name: null,
@@ -92,7 +89,7 @@ describe("MessageDb", () => {
       direction: "outbound",
       channel_id: "whatsapp",
     });
-    db.insertMessage({
+    repo.insertMessage({
       conversation_id: "chat-1",
       sender: "bob",
       sender_name: "Bob",
@@ -102,7 +99,7 @@ describe("MessageDb", () => {
       channel_id: "whatsapp",
     });
 
-    const messages = db.getConversationContext("chat-1", 10);
+    const messages = repo.getConversation("chat-1");
     expect(messages).toHaveLength(3);
     // Chronological: oldest first
     expect(messages[0].content).toBe("First message");
@@ -112,7 +109,7 @@ describe("MessageDb", () => {
 
   it("respects the limit parameter (returns most recent N)", () => {
     for (let i = 0; i < 10; i++) {
-      db.insertMessage({
+      repo.insertMessage({
         conversation_id: "chat-1",
         sender: "bob",
         sender_name: "Bob",
@@ -123,7 +120,7 @@ describe("MessageDb", () => {
       });
     }
 
-    const messages = db.getConversationContext("chat-1", 3);
+    const messages = repo.getConversation("chat-1", { limit: 3 });
     expect(messages).toHaveLength(3);
     // Should return the last 3, in chronological order
     expect(messages[0].content).toBe("Message 7");
@@ -131,8 +128,28 @@ describe("MessageDb", () => {
     expect(messages[2].content).toBe("Message 9");
   });
 
+  it("uses default limit of 50", () => {
+    for (let i = 0; i < 60; i++) {
+      repo.insertMessage({
+        conversation_id: "chat-1",
+        sender: "bob",
+        sender_name: "Bob",
+        content: `Message ${i}`,
+        timestamp: 1700000000000 + i * 1000,
+        direction: "inbound",
+        channel_id: "whatsapp",
+      });
+    }
+
+    // No limit option — should return last 50
+    const messages = repo.getConversation("chat-1");
+    expect(messages).toHaveLength(50);
+    expect(messages[0].content).toBe("Message 10");
+    expect(messages[49].content).toBe("Message 59");
+  });
+
   it("isolates conversations — only returns messages for the given conversation_id", () => {
-    db.insertMessage({
+    repo.insertMessage({
       conversation_id: "chat-1",
       sender: "alice",
       sender_name: "Alice",
@@ -141,7 +158,7 @@ describe("MessageDb", () => {
       direction: "inbound",
       channel_id: "whatsapp",
     });
-    db.insertMessage({
+    repo.insertMessage({
       conversation_id: "chat-2",
       sender: "bob",
       sender_name: "Bob",
@@ -151,22 +168,22 @@ describe("MessageDb", () => {
       channel_id: "whatsapp",
     });
 
-    const chat1 = db.getConversationContext("chat-1", 10);
+    const chat1 = repo.getConversation("chat-1");
     expect(chat1).toHaveLength(1);
     expect(chat1[0].content).toBe("Hello from chat 1");
 
-    const chat2 = db.getConversationContext("chat-2", 10);
+    const chat2 = repo.getConversation("chat-2");
     expect(chat2).toHaveLength(1);
     expect(chat2[0].content).toBe("Hello from chat 2");
   });
 
   it("returns empty array for unknown conversation", () => {
-    const messages = db.getConversationContext("nonexistent", 10);
+    const messages = repo.getConversation("nonexistent");
     expect(messages).toHaveLength(0);
   });
 
   it("includes both inbound and outbound in context", () => {
-    db.insertMessage({
+    repo.insertMessage({
       conversation_id: "chat-1",
       sender: "alice",
       sender_name: "Alice",
@@ -175,7 +192,7 @@ describe("MessageDb", () => {
       direction: "inbound",
       channel_id: "whatsapp",
     });
-    db.insertMessage({
+    repo.insertMessage({
       conversation_id: "chat-1",
       sender: "me",
       sender_name: null,
@@ -185,7 +202,7 @@ describe("MessageDb", () => {
       channel_id: "whatsapp",
     });
 
-    const messages = db.getConversationContext("chat-1", 10);
+    const messages = repo.getConversation("chat-1");
     expect(messages).toHaveLength(2);
     expect(messages[0].direction).toBe("inbound");
     expect(messages[1].direction).toBe("outbound");

@@ -10,24 +10,29 @@ export type StoredMessage = {
   channel_id: string;
 };
 
+// Minimal logger type — compatible with PluginLogger from openclaw/plugin-sdk
+export type Logger = {
+  info: (message: string) => void;
+  warn: (message: string) => void;
+  error: (message: string) => void;
+};
+
 // Plugin configuration with defaults
 export type PluginConfig = {
   ollamaUrl: string;
-  model: string;
   debounceMs: number;
-  cooldownMs: number;
-  contextMessageLimit: number;
   dbPath: string;
   outputDir: string;
+  // When false, messages are stored but the LLM detection pipeline is skipped
+  detectMeetings: boolean;
 };
 
-// Default configuration values
-export const DEFAULT_CONFIG: PluginConfig = {
-  ollamaUrl: "http://localhost:11434",
-  model: "llama3.1:8b",
-  debounceMs: 5000,
-  cooldownMs: 300000,
-  contextMessageLimit: 20,
-  dbPath: "passive/messages.db",
-  outputDir: "passive",
+// Classification result from a single model
+export type MeetingClassification = {
+  has_agreed_to_meet: boolean;
+  has_agreed_date: boolean;
+  reason: string;
 };
+
+// Consensus escalation action
+export type EscalationAction = "add_calendar_event" | "confirm_with_customer" | "none";
