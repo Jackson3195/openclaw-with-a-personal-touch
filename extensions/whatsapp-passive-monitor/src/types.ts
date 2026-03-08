@@ -23,6 +23,8 @@ export type PluginConfig = {
   debounceMs: number;
   dbPath: string;
   outputDir: string;
+  // When false, messages are stored but the LLM detection pipeline is skipped
+  detectMeetings: boolean;
 };
 
 // Classification result from a single model

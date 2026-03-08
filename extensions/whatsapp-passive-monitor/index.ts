@@ -17,11 +17,15 @@ const DEFAULT_CONFIG: PluginConfig = {
   debounceMs: 5000,
   dbPath: "passive/messages.db",
   outputDir: "passive",
+  detectMeetings: true,
 };
 
 export default function register(api: OpenClawPluginApi) {
-  // TODO: Expose plugin via openclaw plugin in the future
-  const config: PluginConfig = { ...DEFAULT_CONFIG };
+  // Merge user-supplied plugin config (from openclaw.plugin.json schema) with defaults
+  const config: PluginConfig = {
+    ...DEFAULT_CONFIG,
+    ...(api.pluginConfig as Partial<PluginConfig>),
+  };
 
   // Resolve DB path relative to openclaw workspace
   const resolvedDbPath = api.resolvePath(`~/.openclaw/workspace/${config.dbPath}`);
@@ -75,8 +79,10 @@ export default function register(api: OpenClawPluginApi) {
       channel_id: "whatsapp",
     });
 
-    // Reset debounce on ALL messages — wait for full conversation to settle
-    debounce.touch(ctx.conversationId ?? event.from);
+    // Only trigger detection pipeline if enabled — otherwise just store
+    if (config.detectMeetings) {
+      debounce.touch(ctx.conversationId ?? event.from);
+    }
 
     // Block ALL WhatsApp messages from reaching the main agent
     return { handled: true };
