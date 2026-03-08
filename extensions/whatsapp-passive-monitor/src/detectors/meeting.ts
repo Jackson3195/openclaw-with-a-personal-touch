@@ -186,12 +186,15 @@ ${conversation}`;
   return async (ctx) => {
     const { conversationId } = ctx;
 
+    logger.info(`meeting-detector: processing conversation ${conversationId}`);
+
     const messages = messageRepo.getConversation(conversationId, { limit: CONTEXT_LIMIT });
     const conversation = formatConversation(messages);
 
     // Run agents sequentially — each gets its own prompt and model
     const classifications: Array<MeetingClassification | null> = [];
     for (const agent of AGENTS) {
+      logger.info(`meeting-detector: detecting meeting via agent ${agent.name}`);
       const prompt = agent.buildPrompt(conversation);
       const result = await ollama.generate<MeetingClassification>({
         prompt,
@@ -199,6 +202,9 @@ ${conversation}`;
         model: agent.model,
       });
       classifications.push(result);
+      logger.info(
+        `meeting-detector: detected meeting via agent ${agent.name} | hasAgreedToMeet: ${result?.has_agreed_to_meet} | hasAgreedDate: ${result?.has_agreed_date} | reason: ${result?.reason}`,
+      );
     }
 
     const escalation = determineEscalation(classifications);
@@ -213,6 +219,7 @@ ${conversation}`;
     let agentPrompt: string;
     if (escalation === "add_calendar_event") {
       agentPrompt = buildCalendarAgentPrompt(conversation);
+      logger.info(`meeting-detector: escalating to add_calendar_event for ${conversationId}`);
     } else {
       // confirm_with_customer — include reasons from T+T models
       const reasons = classifications
@@ -222,9 +229,14 @@ ${conversation}`;
         )
         .map((c) => c.reason);
       agentPrompt = buildConfirmationAgentPrompt(conversation, reasons);
+      logger.info(`meeting-detector: escalating to confirm_with_customer for ${conversationId}`);
     }
 
     const agentResult = await agentRepo.send(agentPrompt);
+
+    logger.info(
+      `meeting-detector: escalation result for ${conversationId}: ${agentResult.success ? "success" : "failure"}`,
+    );
 
     return { escalation, agentNotified: agentResult.success, classifications };
   };
