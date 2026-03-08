@@ -152,7 +152,8 @@ export async function monitorWebInbox(options: {
     }
   };
 
-  type NormalizedInboundMessage = {
+  // Pre-access-control identity: dedup + JID resolution + group metadata.
+  type ResolvedInboundIdentity = {
     id?: string;
     remoteJid: string;
     group: boolean;
@@ -162,12 +163,17 @@ export async function monitorWebInbox(options: {
     groupSubject?: string;
     groupParticipants?: string[];
     messageTimestampMs?: number;
+  };
+
+  type NormalizedInboundMessage = ResolvedInboundIdentity & {
     access: Awaited<ReturnType<typeof checkInboundAccessControl>>;
   };
 
-  const normalizeInboundMessage = async (
+  // Phase 1: Dedup + JID resolution (no access control).
+  // Returns identity fields needed by the message_observed hook.
+  const resolveInboundMessageIdentity = async (
     msg: WAMessage,
-  ): Promise<NormalizedInboundMessage | null> => {
+  ): Promise<ResolvedInboundIdentity | null> => {
     const id = msg.key?.id ?? undefined;
     const remoteJid = msg.key?.remoteJid;
     if (!remoteJid) {
@@ -206,23 +212,6 @@ export async function monitorWebInbox(options: {
       ? Number(msg.messageTimestamp) * 1000
       : undefined;
 
-    const access = await checkInboundAccessControl({
-      accountId: options.accountId,
-      from,
-      selfE164,
-      senderE164,
-      group,
-      pushName: msg.pushName ?? undefined,
-      isFromMe: Boolean(msg.key?.fromMe),
-      messageTimestampMs,
-      connectedAtMs,
-      sock: { sendMessage: (jid, content) => sock.sendMessage(jid, content) },
-      remoteJid,
-    });
-    if (!access.allowed) {
-      return null;
-    }
-
     return {
       id,
       remoteJid,
@@ -233,8 +222,32 @@ export async function monitorWebInbox(options: {
       groupSubject,
       groupParticipants,
       messageTimestampMs,
-      access,
     };
+  };
+
+  // Phase 2: Access control. Only called for messages not handled by hooks.
+  const applyInboundAccessControl = async (
+    identity: ResolvedInboundIdentity,
+    msg: WAMessage,
+  ): Promise<NormalizedInboundMessage | null> => {
+    const access = await checkInboundAccessControl({
+      accountId: options.accountId,
+      from: identity.from,
+      selfE164,
+      senderE164: identity.senderE164,
+      group: identity.group,
+      pushName: msg.pushName ?? undefined,
+      isFromMe: Boolean(msg.key?.fromMe),
+      messageTimestampMs: identity.messageTimestampMs,
+      connectedAtMs,
+      sock: { sendMessage: (jid, content) => sock.sendMessage(jid, content) },
+      remoteJid: identity.remoteJid,
+    });
+    if (!access.allowed) {
+      return null;
+    }
+
+    return { ...identity, access };
   };
 
   const maybeMarkInboundAsRead = async (inbound: NormalizedInboundMessage) => {
@@ -405,46 +418,57 @@ export async function monitorWebInbox(options: {
         accountId: options.accountId,
         direction: "inbound",
       });
-      const inbound = await normalizeInboundMessage(msg);
-      if (!inbound) {
+
+      // Phase 1: Dedup + JID resolution (no access control yet).
+      // This resolves identity fields for the hook BEFORE access control
+      // blocks fromMe messages.
+      const identity = await resolveInboundMessageIdentity(msg);
+      if (!identity) {
         continue;
       }
 
-      // Fire message_observed for allowed messages (including fromMe).
-      // If a plugin returns { handled: true }, skip the downstream pipeline.
+      // Phase 2: Fire message_observed for ALL messages (including fromMe)
+      // BEFORE access control. If a plugin returns { handled: true },
+      // skip the entire downstream pipeline.
       const hookRunner = getGlobalHookRunner();
       if (hookRunner?.hasHooks("message_observed")) {
         const observedBody = extractText(msg.message ?? undefined) ?? "";
         try {
           const observedResult = await hookRunner.runMessageObserved(
             {
-              from: inbound.from,
+              from: identity.from,
               content: observedBody,
-              timestamp: inbound.messageTimestampMs,
+              timestamp: identity.messageTimestampMs,
               fromMe: Boolean(msg.key?.fromMe),
               metadata: {
-                remoteJid: inbound.remoteJid,
+                remoteJid: identity.remoteJid,
                 pushName: msg.pushName ?? undefined,
-                senderE164: inbound.senderE164 ?? undefined,
-                group: inbound.group,
-                groupSubject: inbound.groupSubject ?? undefined,
+                senderE164: identity.senderE164 ?? undefined,
+                group: identity.group,
+                groupSubject: identity.groupSubject ?? undefined,
               },
             },
             {
               channelId: "whatsapp",
               accountId: options.accountId,
-              conversationId: inbound.from,
+              conversationId: identity.from,
             },
           );
           if (observedResult?.handled) {
             logVerbose(
-              `monitor: message_observed hook handled message from ${inbound.from}, skipping pipeline`,
+              `monitor: message_observed hook handled message from ${identity.from}, skipping pipeline`,
             );
             continue;
           }
         } catch (err) {
           logVerbose(`monitor: message_observed hook failed: ${String(err)}`);
         }
+      }
+
+      // Phase 3: Access control (only reached if hook did not handle).
+      const inbound = await applyInboundAccessControl(identity, msg);
+      if (!inbound) {
+        continue;
       }
 
       await maybeMarkInboundAsRead(inbound);
