@@ -18,7 +18,7 @@ const DEFAULT_CONFIG: PluginConfig = {
   debounceMs: 5000,
   dbPath: "passive/messages.db",
   outputDir: "passive",
-  detectMeetings: true,
+  detectMeetings: false,
 };
 
 export default function register(api: OpenClawPluginApi) {
