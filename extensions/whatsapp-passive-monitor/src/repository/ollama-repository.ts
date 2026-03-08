@@ -51,7 +51,10 @@ export class OllamaRepositoryImpl implements OllamaRepository {
       const json = (await res.json()) as { response?: string };
       const raw = json.response ?? "";
       const trimmed = raw.trim();
-      if (!trimmed) return null;
+      if (!trimmed) {
+        this.logger.warn(`ollama repository: empty response from model ${params.model}`);
+        return null;
+      }
 
       // Log raw response before parsing — helps debug malformed LLM output
       this.logger.info(`ollama raw response: ${trimmed}`);

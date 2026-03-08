@@ -136,6 +136,22 @@ describe("OllamaRepository", () => {
     expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining("500"));
   });
 
+  it("logs warning when response field is empty", async () => {
+    const emptyResponse = new Response(JSON.stringify({ response: "", done: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+    mockFetch.mockResolvedValueOnce(emptyResponse);
+    const repo = new OllamaRepositoryImpl("http://localhost:11434", mockLogger);
+
+    const result = await repo.generate({ prompt: "test", format, model: "qwen3.5:4b" });
+
+    expect(result).toBeNull();
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      "ollama repository: empty response from model qwen3.5:4b",
+    );
+  });
+
   it("throws error when unsupported model is passed", async () => {
     const repo = new OllamaRepositoryImpl("http://localhost:11434", mockLogger);
 
