@@ -28,11 +28,12 @@ const format = {
 describe("OllamaRepository", () => {
   it("returns parsed response on success", async () => {
     mockFetch.mockResolvedValueOnce(ollamaResponse({ meetingDetected: true }));
-    const repo = new OllamaRepositoryImpl("http://localhost:11434", "llama3.1:8b");
+    const repo = new OllamaRepositoryImpl("http://localhost:11434");
 
     const result = await repo.generate<{ meetingDetected: boolean }>({
       prompt: "test prompt",
       format,
+      model: "llama3.1:8b",
     });
 
     expect(result).toEqual({ meetingDetected: true });
@@ -40,18 +41,18 @@ describe("OllamaRepository", () => {
 
   it("returns null on fetch error", async () => {
     mockFetch.mockRejectedValueOnce(new Error("network timeout"));
-    const repo = new OllamaRepositoryImpl("http://localhost:11434", "llama3.1:8b");
+    const repo = new OllamaRepositoryImpl("http://localhost:11434");
 
-    const result = await repo.generate({ prompt: "test", format });
+    const result = await repo.generate({ prompt: "test", format, model: "llama3.1:8b" });
 
     expect(result).toBeNull();
   });
 
   it("returns null on non-ok HTTP status", async () => {
     mockFetch.mockResolvedValueOnce(new Response("Internal Server Error", { status: 500 }));
-    const repo = new OllamaRepositoryImpl("http://localhost:11434", "llama3.1:8b");
+    const repo = new OllamaRepositoryImpl("http://localhost:11434");
 
-    const result = await repo.generate({ prompt: "test", format });
+    const result = await repo.generate({ prompt: "test", format, model: "llama3.1:8b" });
 
     expect(result).toBeNull();
   });
@@ -63,18 +64,18 @@ describe("OllamaRepository", () => {
       headers: { "content-type": "application/json" },
     });
     mockFetch.mockResolvedValueOnce(badResponse);
-    const repo = new OllamaRepositoryImpl("http://localhost:11434", "llama3.1:8b");
+    const repo = new OllamaRepositoryImpl("http://localhost:11434");
 
-    const result = await repo.generate({ prompt: "test", format });
+    const result = await repo.generate({ prompt: "test", format, model: "llama3.1:8b" });
 
     expect(result).toBeNull();
   });
 
   it("sends correct body shape to correct URL", async () => {
     mockFetch.mockResolvedValueOnce(ollamaResponse({ meetingDetected: false }));
-    const repo = new OllamaRepositoryImpl("http://localhost:11434", "llama3.1:8b");
+    const repo = new OllamaRepositoryImpl("http://localhost:11434");
 
-    await repo.generate({ prompt: "classify this", format });
+    await repo.generate({ prompt: "classify this", format, model: "llama3.1:8b" });
 
     expect(mockFetch).toHaveBeenCalledWith("http://localhost:11434/api/generate", {
       method: "POST",
@@ -86,5 +87,13 @@ describe("OllamaRepository", () => {
         format,
       }),
     });
+  });
+
+  it("throws error when unsupported model is passed", async () => {
+    const repo = new OllamaRepositoryImpl("http://localhost:11434");
+
+    await expect(
+      repo.generate({ prompt: "test", format, model: "unsupported-model:7b" }),
+    ).rejects.toThrow('Unsupported model: "unsupported-model:7b"');
   });
 });

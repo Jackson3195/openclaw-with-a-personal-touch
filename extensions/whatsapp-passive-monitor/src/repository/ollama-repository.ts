@@ -1,28 +1,37 @@
 export type OllamaRepository = {
   /** Send a prompt to Ollama with structured output format, returns parsed response or null on error */
-  generate: <T>(params: { prompt: string; format: Record<string, unknown> }) => Promise<T | null>;
+  generate: <T>(params: {
+    prompt: string;
+    format: Record<string, unknown>;
+    model: string;
+  }) => Promise<T | null>;
 };
 
 /**
  * Repository for Ollama /api/generate interactions.
- * Model is bound at construction — one instance per model.
+ * Model is passed per generate() call — a single instance serves all models.
  */
 export class OllamaRepositoryImpl implements OllamaRepository {
-  constructor(
-    private readonly ollamaUrl: string,
-    private readonly model: string,
-  ) {}
+  // Only these models are allowed through generate()
+  private static readonly SUPPORTED_MODELS = new Set(["llama3.1:8b", "qwen3.5:4b"]);
+
+  constructor(private readonly ollamaUrl: string) {}
 
   async generate<T>(params: {
     prompt: string;
     format: Record<string, unknown>;
+    model: string;
   }): Promise<T | null> {
+    if (!OllamaRepositoryImpl.SUPPORTED_MODELS.has(params.model)) {
+      throw new Error(`Unsupported model: "${params.model}"`);
+    }
+
     try {
       const res = await fetch(`${this.ollamaUrl}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: this.model,
+          model: params.model,
           prompt: params.prompt,
           stream: false,
           format: params.format,
