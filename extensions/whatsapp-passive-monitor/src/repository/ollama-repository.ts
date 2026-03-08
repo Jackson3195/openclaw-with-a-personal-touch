@@ -1,3 +1,5 @@
+import type { Logger } from "../types.js";
+
 export type OllamaRepository = {
   /** Send a prompt to Ollama with structured output format, returns parsed response or null on error */
   generate: <T>(params: {
@@ -15,7 +17,10 @@ export class OllamaRepositoryImpl implements OllamaRepository {
   // Only these models are allowed through generate()
   private static readonly SUPPORTED_MODELS = new Set(["llama3.1:8b", "qwen3.5:4b"]);
 
-  constructor(private readonly ollamaUrl: string) {}
+  constructor(
+    private readonly ollamaUrl: string,
+    private readonly logger: Logger,
+  ) {}
 
   async generate<T>(params: {
     prompt: string;
@@ -39,7 +44,7 @@ export class OllamaRepositoryImpl implements OllamaRepository {
       });
 
       if (!res.ok) {
-        console.error(`ollama repository: ${res.status} ${res.statusText}`);
+        this.logger.error(`ollama repository: ${res.status} ${res.statusText}`);
         return null;
       }
 
@@ -48,9 +53,12 @@ export class OllamaRepositoryImpl implements OllamaRepository {
       const trimmed = raw.trim();
       if (!trimmed) return null;
 
+      // Log raw response before parsing — helps debug malformed LLM output
+      this.logger.info(`ollama raw response: ${trimmed}`);
+
       return JSON.parse(trimmed) as T;
     } catch (err) {
-      console.error(`ollama repository: ${String(err)}`);
+      this.logger.error(`ollama repository: ${String(err)}`);
       return null;
     }
   }

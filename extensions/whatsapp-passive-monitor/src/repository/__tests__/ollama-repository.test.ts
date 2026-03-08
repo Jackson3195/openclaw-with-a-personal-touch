@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { Logger } from "../../types.ts";
 import { OllamaRepositoryImpl } from "../ollama-repository.ts";
 
 const mockFetch = vi.fn<typeof fetch>();
+const mockLogger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
 beforeEach(() => {
   vi.stubGlobal("fetch", mockFetch);
   mockFetch.mockReset();
+  vi.mocked(mockLogger.info).mockReset();
+  vi.mocked(mockLogger.warn).mockReset();
+  vi.mocked(mockLogger.error).mockReset();
 });
 
 afterEach(() => {
@@ -28,7 +33,7 @@ const format = {
 describe("OllamaRepository", () => {
   it("returns parsed response on success", async () => {
     mockFetch.mockResolvedValueOnce(ollamaResponse({ meetingDetected: true }));
-    const repo = new OllamaRepositoryImpl("http://localhost:11434");
+    const repo = new OllamaRepositoryImpl("http://localhost:11434", mockLogger);
 
     const result = await repo.generate<{ meetingDetected: boolean }>({
       prompt: "test prompt",
@@ -41,7 +46,7 @@ describe("OllamaRepository", () => {
 
   it("returns null on fetch error", async () => {
     mockFetch.mockRejectedValueOnce(new Error("network timeout"));
-    const repo = new OllamaRepositoryImpl("http://localhost:11434");
+    const repo = new OllamaRepositoryImpl("http://localhost:11434", mockLogger);
 
     const result = await repo.generate({ prompt: "test", format, model: "llama3.1:8b" });
 
@@ -50,7 +55,7 @@ describe("OllamaRepository", () => {
 
   it("returns null on non-ok HTTP status", async () => {
     mockFetch.mockResolvedValueOnce(new Response("Internal Server Error", { status: 500 }));
-    const repo = new OllamaRepositoryImpl("http://localhost:11434");
+    const repo = new OllamaRepositoryImpl("http://localhost:11434", mockLogger);
 
     const result = await repo.generate({ prompt: "test", format, model: "llama3.1:8b" });
 
@@ -64,7 +69,7 @@ describe("OllamaRepository", () => {
       headers: { "content-type": "application/json" },
     });
     mockFetch.mockResolvedValueOnce(badResponse);
-    const repo = new OllamaRepositoryImpl("http://localhost:11434");
+    const repo = new OllamaRepositoryImpl("http://localhost:11434", mockLogger);
 
     const result = await repo.generate({ prompt: "test", format, model: "llama3.1:8b" });
 
@@ -73,7 +78,7 @@ describe("OllamaRepository", () => {
 
   it("sends correct body shape to correct URL", async () => {
     mockFetch.mockResolvedValueOnce(ollamaResponse({ meetingDetected: false }));
-    const repo = new OllamaRepositoryImpl("http://localhost:11434");
+    const repo = new OllamaRepositoryImpl("http://localhost:11434", mockLogger);
 
     await repo.generate({ prompt: "classify this", format, model: "llama3.1:8b" });
 
@@ -89,8 +94,50 @@ describe("OllamaRepository", () => {
     });
   });
 
+  it("logs raw response before parsing", async () => {
+    mockFetch.mockResolvedValueOnce(ollamaResponse({ meetingDetected: true }));
+    const repo = new OllamaRepositoryImpl("http://localhost:11434", mockLogger);
+
+    await repo.generate({ prompt: "test", format, model: "llama3.1:8b" });
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.stringContaining('ollama raw response: {"meetingDetected":true}'),
+    );
+  });
+
+  it("logs error via logger on malformed response", async () => {
+    const badResponse = new Response(JSON.stringify({ response: "not json", done: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+    mockFetch.mockResolvedValueOnce(badResponse);
+    const repo = new OllamaRepositoryImpl("http://localhost:11434", mockLogger);
+
+    await repo.generate({ prompt: "test", format, model: "llama3.1:8b" });
+
+    expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining("ollama repository:"));
+  });
+
+  it("logs error via logger on fetch error", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network timeout"));
+    const repo = new OllamaRepositoryImpl("http://localhost:11434", mockLogger);
+
+    await repo.generate({ prompt: "test", format, model: "llama3.1:8b" });
+
+    expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining("network timeout"));
+  });
+
+  it("logs error via logger on non-ok HTTP status", async () => {
+    mockFetch.mockResolvedValueOnce(new Response("Internal Server Error", { status: 500 }));
+    const repo = new OllamaRepositoryImpl("http://localhost:11434", mockLogger);
+
+    await repo.generate({ prompt: "test", format, model: "llama3.1:8b" });
+
+    expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining("500"));
+  });
+
   it("throws error when unsupported model is passed", async () => {
-    const repo = new OllamaRepositoryImpl("http://localhost:11434");
+    const repo = new OllamaRepositoryImpl("http://localhost:11434", mockLogger);
 
     await expect(
       repo.generate({ prompt: "test", format, model: "unsupported-model:7b" }),

@@ -54,7 +54,7 @@ export default function register(api: OpenClawPluginApi) {
   }
 
   // Single Ollama instance — model is passed per generate() call
-  const ollama = new OllamaRepositoryImpl(config.ollamaUrl);
+  const ollama = new OllamaRepositoryImpl(config.ollamaUrl, logger);
   const agentRepo = new AgentRepositoryImpl(runPluginCommandWithTimeout);
 
   // Initialize all detectors and register them
