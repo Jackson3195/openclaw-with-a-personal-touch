@@ -161,8 +161,10 @@ ${conversation}`;
   /**
    * Build the prompt sent to the main agent when both models agree (add calendar event).
    */
-  const buildCalendarAgentPrompt = (conversation: string): string =>
+  const buildCalendarAgentPrompt = (conversation: string, escalationId: number): string =>
     `Two independent classifiers have both confirmed that the following WhatsApp conversation contains arrangements to meet up in person.
+
+Escalation ID: ${escalationId}
 
 Use the calendar-guard skill to process this as a calendar event.
 
@@ -172,8 +174,14 @@ ${conversation}`;
   /**
    * Build the prompt sent to the main agent when models disagree (confirm with customer).
    */
-  const buildConfirmationAgentPrompt = (conversation: string, reasons: string[]): string =>
+  const buildConfirmationAgentPrompt = (
+    conversation: string,
+    reasons: string[],
+    escalationId: number,
+  ): string =>
     `A classifier has flagged the following WhatsApp conversation as potentially containing arrangements to meet up in person, but there is disagreement between models.
+
+Escalation ID: ${escalationId}
 
 Model reasons:
 ${reasons.map((r) => `- ${r}`).join("\n")}
@@ -239,10 +247,17 @@ ${conversation}`;
       return { escalation, agentNotified: false, classifications, deduped: false };
     }
 
+    // Insert escalation first to get the row ID for the agent prompt
+    const storedEscalation = escalationRepo.insertEscalation({
+      conversationId,
+      escalationType: escalation,
+      windowMessageIds: [...currentIds],
+    });
+
     // Build the appropriate agent prompt based on escalation type
     let agentPrompt: string;
     if (escalation === "add_calendar_event") {
-      agentPrompt = buildCalendarAgentPrompt(conversation);
+      agentPrompt = buildCalendarAgentPrompt(conversation, storedEscalation.id);
       logger.info(`meeting-detector: escalating to add_calendar_event for ${conversationId}`);
     } else {
       // confirm_with_customer — include reasons from T+T models
@@ -252,19 +267,15 @@ ${conversation}`;
             c !== null && c.has_agreed_to_meet && c.has_agreed_date,
         )
         .map((c) => c.reason);
-      agentPrompt = buildConfirmationAgentPrompt(conversation, reasons);
+      agentPrompt = buildConfirmationAgentPrompt(conversation, reasons, storedEscalation.id);
       logger.info(`meeting-detector: escalating to confirm_with_customer for ${conversationId}`);
     }
 
     const agentResult = await agentRepo.send(agentPrompt);
 
-    // Only persist escalation if the agent send succeeded — allows retry on next cycle
-    if (agentResult.success) {
-      escalationRepo.insertEscalation({
-        conversationId,
-        escalationType: escalation,
-        windowMessageIds: [...currentIds],
-      });
+    // Rollback escalation if agent send failed — allows retry on next cycle
+    if (!agentResult.success) {
+      escalationRepo.deleteEscalation(storedEscalation.id);
     }
 
     logger.info(

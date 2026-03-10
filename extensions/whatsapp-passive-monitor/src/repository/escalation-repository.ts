@@ -11,16 +11,18 @@ export type StoredEscalation = {
 };
 
 export type EscalationRepository = {
-  /** Insert a new escalation (created defaults to false) */
+  /** Insert a new escalation and return the created row */
   insertEscalation: (params: {
     conversationId: string;
     escalationType: string;
     windowMessageIds: number[];
-  }) => void;
+  }) => StoredEscalation;
   /** Get the most recent escalation for a conversation, or null */
   getLastEscalation: (conversationId: string) => StoredEscalation | null;
-  /** Mark the most recent uncreated escalation as created */
-  markCreated: (conversationId: string) => void;
+  /** Mark an escalation as created by id */
+  markCreated: (id: number) => void;
+  /** Delete an escalation by id (used for rollback on agent send failure) */
+  deleteEscalation: (id: number) => void;
 };
 
 // Raw row shape from SQLite (window_message_ids is a JSON string, created is 0/1)
@@ -42,6 +44,7 @@ export class EscalationRepositoryImpl implements EscalationRepository {
   private readonly insertStmt: PreparedStatement;
   private readonly queryStmt: PreparedStatement;
   private readonly markCreatedStmt: PreparedStatement;
+  private readonly deleteStmt: PreparedStatement;
 
   constructor(db: SqliteRepository) {
     // Create schema (if it doesn't exist)
@@ -74,14 +77,11 @@ export class EscalationRepositoryImpl implements EscalationRepository {
     `);
 
     this.markCreatedStmt = db.prepare(`
-      UPDATE escalations
-      SET created = 1
-      WHERE id = (
-        SELECT id FROM escalations
-        WHERE conversation_id = ? AND created = 0
-        ORDER BY id DESC
-        LIMIT 1
-      )
+      UPDATE escalations SET created = 1 WHERE id = ?
+    `);
+
+    this.deleteStmt = db.prepare(`
+      DELETE FROM escalations WHERE id = ?
     `);
   }
 
@@ -89,13 +89,15 @@ export class EscalationRepositoryImpl implements EscalationRepository {
     conversationId: string;
     escalationType: string;
     windowMessageIds: number[];
-  }): void {
+  }): StoredEscalation {
     this.insertStmt.run(
       params.conversationId,
       params.escalationType,
       JSON.stringify(params.windowMessageIds),
       Date.now(),
     );
+    // Just inserted — guaranteed to exist
+    return this.getLastEscalation(params.conversationId)!;
   }
 
   getLastEscalation(conversationId: string): StoredEscalation | null {
@@ -113,7 +115,11 @@ export class EscalationRepositoryImpl implements EscalationRepository {
     };
   }
 
-  markCreated(conversationId: string): void {
-    this.markCreatedStmt.run(conversationId);
+  markCreated(id: number): void {
+    this.markCreatedStmt.run(id);
+  }
+
+  deleteEscalation(id: number): void {
+    this.deleteStmt.run(id);
   }
 }

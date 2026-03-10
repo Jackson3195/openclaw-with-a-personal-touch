@@ -32,20 +32,19 @@ describe("EscalationRepository", () => {
 
   // ---- Insert + retrieve ----
 
-  it("inserts and retrieves an escalation", () => {
-    repo.insertEscalation({
+  it("inserts and returns the created escalation row", () => {
+    const result = repo.insertEscalation({
       conversationId: "chat-1",
       escalationType: "add_calendar_event",
       windowMessageIds: [1, 2, 3],
     });
 
-    const result = repo.getLastEscalation("chat-1");
-    expect(result).not.toBeNull();
-    expect(result!.conversation_id).toBe("chat-1");
-    expect(result!.escalation_type).toBe("add_calendar_event");
-    expect(result!.created).toBe(false);
-    expect(result!.id).toBeGreaterThan(0);
-    expect(result!.created_at).toBeGreaterThan(0);
+    expect(result.conversation_id).toBe("chat-1");
+    expect(result.escalation_type).toBe("add_calendar_event");
+    expect(result.window_message_ids).toEqual([1, 2, 3]);
+    expect(result.created).toBe(false);
+    expect(result.id).toBeGreaterThan(0);
+    expect(result.created_at).toBeGreaterThan(0);
   });
 
   it("returns the most recent escalation", () => {
@@ -86,17 +85,32 @@ describe("EscalationRepository", () => {
 
   // ---- markCreated ----
 
-  it("markCreated updates the latest uncreated escalation", () => {
-    repo.insertEscalation({
+  it("markCreated updates the escalation by id", () => {
+    const inserted = repo.insertEscalation({
       conversationId: "chat-1",
       escalationType: "add_calendar_event",
       windowMessageIds: [1, 2, 3],
     });
 
-    repo.markCreated("chat-1");
+    repo.markCreated(inserted.id);
 
     const result = repo.getLastEscalation("chat-1");
     expect(result!.created).toBe(true);
+  });
+
+  // ---- deleteEscalation ----
+
+  it("deleteEscalation removes the row by id", () => {
+    const inserted = repo.insertEscalation({
+      conversationId: "chat-1",
+      escalationType: "add_calendar_event",
+      windowMessageIds: [1, 2, 3],
+    });
+
+    repo.deleteEscalation(inserted.id);
+
+    const result = repo.getLastEscalation("chat-1");
+    expect(result).toBeNull();
   });
 
   // ---- Isolation ----

@@ -53,10 +53,19 @@ const createMockLogger = (): Logger => ({
 });
 
 // Mock escalation repo — defaults to no prior escalation (null)
+// insertEscalation returns a StoredEscalation with auto-incrementing id
+let nextEscalationId = 100;
 const createMockEscalationRepo = (
   lastEscalation: { window_message_ids: number[] } | null = null,
 ): EscalationRepository => ({
-  insertEscalation: vi.fn(),
+  insertEscalation: vi.fn().mockImplementation((params) => ({
+    id: nextEscalationId++,
+    conversation_id: params.conversationId,
+    escalation_type: params.escalationType,
+    window_message_ids: params.windowMessageIds,
+    created: false,
+    created_at: Date.now(),
+  })),
   getLastEscalation: vi.fn().mockReturnValue(
     lastEscalation
       ? {
@@ -70,6 +79,7 @@ const createMockEscalationRepo = (
       : null,
   ),
   markCreated: vi.fn(),
+  deleteEscalation: vi.fn(),
 });
 
 // Helper to create messages with specific IDs (for dedup tests)
@@ -284,24 +294,36 @@ describe("meetingDetector", () => {
   });
 
   describe("agent notification", () => {
-    it("calendar event prompt contains calendar-guard and calendar event", async () => {
+    it("calendar event prompt contains calendar-guard, calendar event, and escalation ID", async () => {
       const agentRepo = createMockAgentRepo();
-      const execute = meetingDetector(createDeps(createMockOllama(TT, TT), { agentRepo }));
+      const escalationRepo = createMockEscalationRepo(null);
+      const execute = meetingDetector(
+        createDeps(createMockOllama(TT, TT), { agentRepo, escalationRepo }),
+      );
       await execute({ conversationId: "chat-1" });
 
       const prompt = (agentRepo.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const insertedId = (escalationRepo.insertEscalation as ReturnType<typeof vi.fn>).mock
+        .results[0].value.id;
       expect(prompt).toContain("calendar-guard");
       expect(prompt).toContain("calendar event");
+      expect(prompt).toContain(`Escalation ID: ${insertedId}`);
     });
 
-    it("confirmation prompt contains confirm and includes model reasons", async () => {
+    it("confirmation prompt contains confirm, model reasons, and escalation ID", async () => {
       const agentRepo = createMockAgentRepo();
-      const execute = meetingDetector(createDeps(createMockOllama(TT, FF), { agentRepo }));
+      const escalationRepo = createMockEscalationRepo(null);
+      const execute = meetingDetector(
+        createDeps(createMockOllama(TT, FF), { agentRepo, escalationRepo }),
+      );
       await execute({ conversationId: "chat-1" });
 
       const prompt = (agentRepo.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const insertedId = (escalationRepo.insertEscalation as ReturnType<typeof vi.fn>).mock
+        .results[0].value.id;
       expect(prompt).toContain("confirm");
       expect(prompt).toContain(TT.reason);
+      expect(prompt).toContain(`Escalation ID: ${insertedId}`);
     });
 
     it("confirmation prompt includes reasons from the agreeing model", async () => {
@@ -435,7 +457,7 @@ describe("meetingDetector", () => {
       expect(result.deduped).toBe(false);
     });
 
-    it("does not insert escalation when agent send fails", async () => {
+    it("deletes escalation when agent send fails (rollback)", async () => {
       const agentRepo = createMockAgentRepo(false);
       const escalationRepo = createMockEscalationRepo(null);
       const execute = meetingDetector(
@@ -443,7 +465,23 @@ describe("meetingDetector", () => {
       );
       await execute({ conversationId: "chat-1" });
 
-      expect(escalationRepo.insertEscalation).not.toHaveBeenCalled();
+      // Insert was called (before send), then delete was called (rollback)
+      expect(escalationRepo.insertEscalation).toHaveBeenCalled();
+      const insertedId = (escalationRepo.insertEscalation as ReturnType<typeof vi.fn>).mock
+        .results[0].value.id;
+      expect(escalationRepo.deleteEscalation).toHaveBeenCalledWith(insertedId);
+    });
+
+    it("does not delete escalation when agent send succeeds", async () => {
+      const agentRepo = createMockAgentRepo(true);
+      const escalationRepo = createMockEscalationRepo(null);
+      const execute = meetingDetector(
+        createDeps(createMockOllama(TT, TT), { agentRepo, escalationRepo }),
+      );
+      await execute({ conversationId: "chat-1" });
+
+      expect(escalationRepo.insertEscalation).toHaveBeenCalled();
+      expect(escalationRepo.deleteEscalation).not.toHaveBeenCalled();
     });
 
     it("does not insert escalation when no meeting detected", async () => {
