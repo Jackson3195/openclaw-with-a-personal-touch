@@ -55,12 +55,12 @@ describe("DetectionRepository", () => {
     });
     repo.insertDetection({
       conversationId: "chat-1",
-      detectionType: "confirm_with_customer",
+      detectionType: "add_calendar_event",
       windowMessageIds: [4, 5, 6],
     });
 
     const result = repo.getLastDetection("chat-1");
-    expect(result!.detection_type).toBe("confirm_with_customer");
+    expect(result!.detection_type).toBe("add_calendar_event");
     expect(result!.window_message_ids).toEqual([4, 5, 6]);
   });
 

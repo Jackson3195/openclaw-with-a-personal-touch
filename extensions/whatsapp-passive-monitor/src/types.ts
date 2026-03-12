@@ -35,4 +35,4 @@ export type MeetingClassification = {
 };
 
 // Consensus detection action
-export type DetectionAction = "add_calendar_event" | "confirm_with_customer" | "none";
+export type DetectionAction = "add_calendar_event" | "none";

@@ -210,44 +210,44 @@ describe("meetingDetector", () => {
       expect(result.deduped).toBe(false);
     });
 
-    it("returns confirm_with_customer when A is T+T and B is T+F", async () => {
+    it("returns none when A is T+T and B is T+F (disagreement)", async () => {
       const execute = meetingDetector(createDeps(createMockOllama(TT, TF)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.detection).toBe("confirm_with_customer");
-      expect(result.agentNotified).toBe(true);
+      expect(result.detection).toBe("none");
+      expect(result.agentNotified).toBe(false);
     });
 
-    it("returns confirm_with_customer when A is T+F and B is T+T", async () => {
+    it("returns none when A is T+F and B is T+T (disagreement)", async () => {
       const execute = meetingDetector(createDeps(createMockOllama(TF, TT)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.detection).toBe("confirm_with_customer");
-      expect(result.agentNotified).toBe(true);
+      expect(result.detection).toBe("none");
+      expect(result.agentNotified).toBe(false);
     });
 
-    it("returns confirm_with_customer when A is T+T and B is F+F", async () => {
+    it("returns none when A is T+T and B is F+F (disagreement)", async () => {
       const execute = meetingDetector(createDeps(createMockOllama(TT, FF)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.detection).toBe("confirm_with_customer");
-      expect(result.agentNotified).toBe(true);
+      expect(result.detection).toBe("none");
+      expect(result.agentNotified).toBe(false);
     });
 
-    it("returns confirm_with_customer when A is F+F and B is T+T", async () => {
+    it("returns none when A is F+F and B is T+T (disagreement)", async () => {
       const execute = meetingDetector(createDeps(createMockOllama(FF, TT)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.detection).toBe("confirm_with_customer");
-      expect(result.agentNotified).toBe(true);
+      expect(result.detection).toBe("none");
+      expect(result.agentNotified).toBe(false);
     });
 
-    it("returns confirm_with_customer when A is T+T and B is F+T", async () => {
+    it("returns none when A is T+T and B is F+T (disagreement)", async () => {
       const execute = meetingDetector(createDeps(createMockOllama(TT, FT)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.detection).toBe("confirm_with_customer");
-      expect(result.agentNotified).toBe(true);
+      expect(result.detection).toBe("none");
+      expect(result.agentNotified).toBe(false);
     });
 
     it("returns none when both agents return T+F (no date)", async () => {
@@ -308,36 +308,6 @@ describe("meetingDetector", () => {
       expect(prompt).toContain("calendar-guard");
       expect(prompt).toContain("calendar event");
       expect(prompt).toContain(`Detection ID: ${insertedId}`);
-    });
-
-    it("confirmation prompt contains confirm, model reasons, and detection ID", async () => {
-      const agentRepo = createMockAgentRepo();
-      const detectionRepo = createMockDetectionRepo(null);
-      const execute = meetingDetector(
-        createDeps(createMockOllama(TT, FF), { agentRepo, detectionRepo }),
-      );
-      await execute({ conversationId: "chat-1" });
-
-      const prompt = (agentRepo.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-      const insertedId = (detectionRepo.insertDetection as ReturnType<typeof vi.fn>).mock.results[0]
-        .value.id;
-      expect(prompt).toContain("confirm");
-      expect(prompt).toContain(TT.reason);
-      expect(prompt).toContain(`Detection ID: ${insertedId}`);
-    });
-
-    it("confirmation prompt includes reasons from the agreeing model", async () => {
-      const agreeResult: MeetingClassification = {
-        has_agreed_to_meet: true,
-        has_agreed_date: true,
-        reason: "they agreed to meet for dinner on Friday",
-      };
-      const agentRepo = createMockAgentRepo();
-      const execute = meetingDetector(createDeps(createMockOllama(agreeResult, FF), { agentRepo }));
-      await execute({ conversationId: "chat-1" });
-
-      const prompt = (agentRepo.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-      expect(prompt).toContain("they agreed to meet for dinner on Friday");
     });
 
     it("does not call agentRepo.send when detection is none", async () => {

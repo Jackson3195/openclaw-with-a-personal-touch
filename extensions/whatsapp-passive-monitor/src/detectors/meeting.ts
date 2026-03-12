@@ -29,7 +29,6 @@ export type MeetingDetectorResult = {
  * Consensus rules:
  * - Any null result → "none" (error = do nothing)
  * - Both T+T → "add_calendar_event"
- * - Exactly one T+T → "confirm_with_customer"
  * - All other combinations → "none"
  */
 export const meetingDetector: Detector<MeetingDetectorDeps, MeetingDetectorResult> = (deps) => {
@@ -143,8 +142,7 @@ ${conversation}`;
 
   /**
    * Determine the detection action based on consensus of classification results.
-   * Any null → "none"; both T+T → "add_calendar_event";
-   * exactly one T+T → "confirm_with_customer"; else → "none".
+   * Any null → "none"; both T+T → "add_calendar_event"; else → "none".
    */
   const determineDetection = (results: Array<MeetingClassification | null>): DetectionAction => {
     // Any null means an error occurred — do nothing
@@ -154,7 +152,6 @@ ${conversation}`;
     const ttCount = results.filter((r) => isTT(r!)).length;
 
     if (ttCount === results.length) return "add_calendar_event";
-    if (ttCount === 1) return "confirm_with_customer";
     return "none";
   };
 
@@ -167,26 +164,6 @@ ${conversation}`;
 Detection ID: ${detectionId}
 
 Use the calendar-guard skill to process this as a calendar event.
-
---- Conversation ---
-${conversation}`;
-
-  /**
-   * Build the prompt sent to the main agent when models disagree (confirm with customer).
-   */
-  const buildConfirmationAgentPrompt = (
-    conversation: string,
-    reasons: string[],
-    detectionId: number,
-  ): string =>
-    `A classifier has flagged the following WhatsApp conversation as potentially containing arrangements to meet up in person, but there is disagreement between models.
-
-Detection ID: ${detectionId}
-
-Model reasons:
-${reasons.map((r) => `- ${r}`).join("\n")}
-
-Use the calendar-guard skill to review the conversation and confirm whether a calendar event should be created.
 
 --- Conversation ---
 ${conversation}`;
@@ -254,22 +231,9 @@ ${conversation}`;
       windowMessageIds: [...currentIds],
     });
 
-    // Build the appropriate agent prompt based on detection type
-    let agentPrompt: string;
-    if (detection === "add_calendar_event") {
-      agentPrompt = buildCalendarAgentPrompt(conversation, storedDetection.id);
-      logger.info(`meeting-detector: detected add_calendar_event for ${conversationId}`);
-    } else {
-      // confirm_with_customer — include reasons from T+T models
-      const reasons = classifications
-        .filter(
-          (c): c is MeetingClassification =>
-            c !== null && c.has_agreed_to_meet && c.has_agreed_date,
-        )
-        .map((c) => c.reason);
-      agentPrompt = buildConfirmationAgentPrompt(conversation, reasons, storedDetection.id);
-      logger.info(`meeting-detector: detected confirm_with_customer for ${conversationId}`);
-    }
+    // Both agents agreed — build calendar event prompt
+    const agentPrompt = buildCalendarAgentPrompt(conversation, storedDetection.id);
+    logger.info(`meeting-detector: detected add_calendar_event for ${conversationId}`);
 
     const agentResult = await agentRepo.send(agentPrompt);
 
