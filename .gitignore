@@ -81,6 +81,7 @@ apps/ios/*.mobileprovision
 # Local untracked files
 .local/
 docs/.local/
+tmp/
 IDENTITY.md
 USER.md
 .tgz
@@ -125,3 +126,4 @@ dist/protocol.schema.json
 
 # Ignore local research dir
 .research
+.dev-state
