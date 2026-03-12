@@ -3,6 +3,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { createDebounceManager, type DebounceManager } from "./src/debounce.js";
 import { createFileLogger, composeLoggers } from "./src/file-logger.js";
 import { AgentRepositoryImpl } from "./src/repository/agent-repository.js";
+import { DetectionRepositoryImpl } from "./src/repository/detection-repository.js";
 import {
   MessageRepositoryImpl,
   type MessageRepository,
@@ -45,9 +46,11 @@ export default function register(api: OpenClawPluginApi) {
   const resolvedDbPath = api.resolvePath(`~/.openclaw/workspace/${config.dbPath}`);
 
   let messageRepo: MessageRepository;
+  let detectionRepo: DetectionRepositoryImpl;
   try {
     const sqliteRepo = new SqliteRepositoryImpl(resolvedDbPath);
     messageRepo = new MessageRepositoryImpl(sqliteRepo);
+    detectionRepo = new DetectionRepositoryImpl(sqliteRepo);
   } catch (err) {
     logger.error(`whatsapp-passive-monitor: failed to open SQLite: ${String(err)}`);
     return;
@@ -62,6 +65,7 @@ export default function register(api: OpenClawPluginApi) {
     messageRepo,
     ollama,
     agentRepo,
+    detectionRepo,
     logger,
   });
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { AgentRepository } from "../../repository/agent-repository.ts";
+import type { DetectionRepository } from "../../repository/detection-repository.ts";
 import type { MessageRepository } from "../../repository/message-repository.ts";
 import type { OllamaRepository } from "../../repository/ollama-repository.ts";
 import type { Logger, MeetingClassification, StoredMessage } from "../../types.ts";
@@ -51,6 +52,40 @@ const createMockLogger = (): Logger => ({
   error: vi.fn(),
 });
 
+// Mock detection repo — defaults to no prior detection (null)
+// insertDetection returns a StoredDetection with auto-incrementing id
+let nextDetectionId = 100;
+const createMockDetectionRepo = (
+  lastDetection: { window_message_ids: number[] } | null = null,
+): DetectionRepository => ({
+  insertDetection: vi.fn().mockImplementation((params) => ({
+    id: nextDetectionId++,
+    conversation_id: params.conversationId,
+    detection_type: params.detectionType,
+    window_message_ids: params.windowMessageIds,
+    created: false,
+    created_at: Date.now(),
+  })),
+  getLastDetection: vi.fn().mockReturnValue(
+    lastDetection
+      ? {
+          id: 1,
+          conversation_id: "chat-1",
+          detection_type: "add_calendar_event",
+          window_message_ids: lastDetection.window_message_ids,
+          created: false,
+          created_at: Date.now(),
+        }
+      : null,
+  ),
+  markCreated: vi.fn(),
+  deleteDetection: vi.fn(),
+});
+
+// Helper to create messages with specific IDs (for dedup tests)
+const messagesWithIds = (ids: number[]): StoredMessage[] =>
+  ids.map((id) => ({ ...sampleMessages[0], id }));
+
 // Shorthand for classification results
 const TT: MeetingClassification = {
   has_agreed_to_meet: true,
@@ -76,11 +111,16 @@ const FF: MeetingClassification = {
 // Helper to create deps object
 const createDeps = (
   ollama: OllamaRepository,
-  overrides?: { repo?: MessageRepository; agentRepo?: AgentRepository },
+  overrides?: {
+    repo?: MessageRepository;
+    agentRepo?: AgentRepository;
+    detectionRepo?: DetectionRepository;
+  },
 ) => ({
   messageRepo: overrides?.repo ?? createMockRepo(),
   ollama,
   agentRepo: overrides?.agentRepo ?? createMockAgentRepo(),
+  detectionRepo: overrides?.detectionRepo ?? createMockDetectionRepo(),
   logger: createMockLogger(),
 });
 
@@ -160,76 +200,79 @@ describe("meetingDetector", () => {
     });
   });
 
-  describe("consensus escalation", () => {
+  describe("consensus detection", () => {
     it("returns add_calendar_event when both agents return T+T", async () => {
       const execute = meetingDetector(createDeps(createMockOllama(TT, TT)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.escalation).toBe("add_calendar_event");
+      expect(result.detection).toBe("add_calendar_event");
       expect(result.agentNotified).toBe(true);
+      expect(result.deduped).toBe(false);
     });
 
-    it("returns confirm_with_customer when A is T+T and B is T+F", async () => {
+    it("returns none when A is T+T and B is T+F (disagreement)", async () => {
       const execute = meetingDetector(createDeps(createMockOllama(TT, TF)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.escalation).toBe("confirm_with_customer");
-      expect(result.agentNotified).toBe(true);
+      expect(result.detection).toBe("none");
+      expect(result.agentNotified).toBe(false);
     });
 
-    it("returns confirm_with_customer when A is T+F and B is T+T", async () => {
+    it("returns none when A is T+F and B is T+T (disagreement)", async () => {
       const execute = meetingDetector(createDeps(createMockOllama(TF, TT)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.escalation).toBe("confirm_with_customer");
-      expect(result.agentNotified).toBe(true);
+      expect(result.detection).toBe("none");
+      expect(result.agentNotified).toBe(false);
     });
 
-    it("returns confirm_with_customer when A is T+T and B is F+F", async () => {
+    it("returns none when A is T+T and B is F+F (disagreement)", async () => {
       const execute = meetingDetector(createDeps(createMockOllama(TT, FF)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.escalation).toBe("confirm_with_customer");
-      expect(result.agentNotified).toBe(true);
+      expect(result.detection).toBe("none");
+      expect(result.agentNotified).toBe(false);
     });
 
-    it("returns confirm_with_customer when A is F+F and B is T+T", async () => {
+    it("returns none when A is F+F and B is T+T (disagreement)", async () => {
       const execute = meetingDetector(createDeps(createMockOllama(FF, TT)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.escalation).toBe("confirm_with_customer");
-      expect(result.agentNotified).toBe(true);
+      expect(result.detection).toBe("none");
+      expect(result.agentNotified).toBe(false);
     });
 
-    it("returns confirm_with_customer when A is T+T and B is F+T", async () => {
+    it("returns none when A is T+T and B is F+T (disagreement)", async () => {
       const execute = meetingDetector(createDeps(createMockOllama(TT, FT)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.escalation).toBe("confirm_with_customer");
-      expect(result.agentNotified).toBe(true);
+      expect(result.detection).toBe("none");
+      expect(result.agentNotified).toBe(false);
     });
 
     it("returns none when both agents return T+F (no date)", async () => {
       const execute = meetingDetector(createDeps(createMockOllama(TF, TF)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.escalation).toBe("none");
+      expect(result.detection).toBe("none");
       expect(result.agentNotified).toBe(false);
+      expect(result.deduped).toBe(false);
     });
 
     it("returns none when neither agent detects a meeting", async () => {
       const execute = meetingDetector(createDeps(createMockOllama(FF, FF)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.escalation).toBe("none");
+      expect(result.detection).toBe("none");
       expect(result.agentNotified).toBe(false);
+      expect(result.deduped).toBe(false);
     });
 
     it("returns none when agent A returns null (error = do nothing)", async () => {
       const execute = meetingDetector(createDeps(createMockOllama(null, TT)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.escalation).toBe("none");
+      expect(result.detection).toBe("none");
       expect(result.agentNotified).toBe(false);
     });
 
@@ -237,7 +280,7 @@ describe("meetingDetector", () => {
       const execute = meetingDetector(createDeps(createMockOllama(TT, null)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.escalation).toBe("none");
+      expect(result.detection).toBe("none");
       expect(result.agentNotified).toBe(false);
     });
 
@@ -245,47 +288,29 @@ describe("meetingDetector", () => {
       const execute = meetingDetector(createDeps(createMockOllama(null, null)));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.escalation).toBe("none");
+      expect(result.detection).toBe("none");
       expect(result.agentNotified).toBe(false);
     });
   });
 
   describe("agent notification", () => {
-    it("calendar event prompt contains calendar-guard and calendar event", async () => {
+    it("calendar event prompt contains calendar-guard, calendar event, and detection ID", async () => {
       const agentRepo = createMockAgentRepo();
-      const execute = meetingDetector(createDeps(createMockOllama(TT, TT), { agentRepo }));
+      const detectionRepo = createMockDetectionRepo(null);
+      const execute = meetingDetector(
+        createDeps(createMockOllama(TT, TT), { agentRepo, detectionRepo }),
+      );
       await execute({ conversationId: "chat-1" });
 
       const prompt = (agentRepo.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+      const insertedId = (detectionRepo.insertDetection as ReturnType<typeof vi.fn>).mock.results[0]
+        .value.id;
       expect(prompt).toContain("calendar-guard");
       expect(prompt).toContain("calendar event");
+      expect(prompt).toContain(`Detection ID: ${insertedId}`);
     });
 
-    it("confirmation prompt contains confirm and includes model reasons", async () => {
-      const agentRepo = createMockAgentRepo();
-      const execute = meetingDetector(createDeps(createMockOllama(TT, FF), { agentRepo }));
-      await execute({ conversationId: "chat-1" });
-
-      const prompt = (agentRepo.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-      expect(prompt).toContain("confirm");
-      expect(prompt).toContain(TT.reason);
-    });
-
-    it("confirmation prompt includes reasons from the agreeing model", async () => {
-      const agreeResult: MeetingClassification = {
-        has_agreed_to_meet: true,
-        has_agreed_date: true,
-        reason: "they agreed to meet for dinner on Friday",
-      };
-      const agentRepo = createMockAgentRepo();
-      const execute = meetingDetector(createDeps(createMockOllama(agreeResult, FF), { agentRepo }));
-      await execute({ conversationId: "chat-1" });
-
-      const prompt = (agentRepo.send as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-      expect(prompt).toContain("they agreed to meet for dinner on Friday");
-    });
-
-    it("does not call agentRepo.send when escalation is none", async () => {
+    it("does not call agentRepo.send when detection is none", async () => {
       const agentRepo = createMockAgentRepo();
       const execute = meetingDetector(createDeps(createMockOllama(FF, FF), { agentRepo }));
       await execute({ conversationId: "chat-1" });
@@ -298,7 +323,7 @@ describe("meetingDetector", () => {
       const execute = meetingDetector(createDeps(createMockOllama(TT, TT), { agentRepo }));
       const result = await execute({ conversationId: "chat-1" });
 
-      expect(result.escalation).toBe("add_calendar_event");
+      expect(result.detection).toBe("add_calendar_event");
       expect(result.agentNotified).toBe(false);
     });
   });
@@ -341,6 +366,109 @@ describe("meetingDetector", () => {
       const result = await execute({ conversationId: "chat-1" });
 
       expect(result.classifications).toEqual([TT, FF]);
+    });
+  });
+
+  describe("deduplication", () => {
+    it("first detection proceeds normally when no prior detection exists", async () => {
+      const agentRepo = createMockAgentRepo();
+      const detectionRepo = createMockDetectionRepo(null);
+      const execute = meetingDetector(
+        createDeps(createMockOllama(TT, TT), { agentRepo, detectionRepo }),
+      );
+      const result = await execute({ conversationId: "chat-1" });
+
+      expect(agentRepo.send).toHaveBeenCalled();
+      expect(detectionRepo.insertDetection).toHaveBeenCalledWith({
+        conversationId: "chat-1",
+        detectionType: "add_calendar_event",
+        windowMessageIds: [1, 2],
+      });
+      expect(result.deduped).toBe(false);
+    });
+
+    it("skips when current window overlaps with last detection", async () => {
+      const agentRepo = createMockAgentRepo();
+      const ollama = createMockOllama(TT, TT);
+      // Last detection used IDs [1, 2] — same as sampleMessages
+      const detectionRepo = createMockDetectionRepo({ window_message_ids: [1, 2] });
+      const execute = meetingDetector(createDeps(ollama, { agentRepo, detectionRepo }));
+      const result = await execute({ conversationId: "chat-1" });
+
+      expect(agentRepo.send).not.toHaveBeenCalled();
+      expect(ollama.generate).not.toHaveBeenCalled();
+      expect(result.deduped).toBe(true);
+    });
+
+    it("skips when even 1 message ID overlaps (partial overlap)", async () => {
+      const repo = createMockRepo(messagesWithIds([3, 4, 5]));
+      const agentRepo = createMockAgentRepo();
+      const ollama = createMockOllama(TT, TT);
+      // Stored [1,2,3] — current [3,4,5] — overlap on ID 3
+      const detectionRepo = createMockDetectionRepo({ window_message_ids: [1, 2, 3] });
+      const execute = meetingDetector(createDeps(ollama, { repo, agentRepo, detectionRepo }));
+      const result = await execute({ conversationId: "chat-1" });
+
+      expect(agentRepo.send).not.toHaveBeenCalled();
+      expect(result.deduped).toBe(true);
+    });
+
+    it("proceeds when no IDs overlap (window scrolled past)", async () => {
+      const repo = createMockRepo(messagesWithIds([4, 5, 6]));
+      const agentRepo = createMockAgentRepo();
+      // Stored [1,2,3] — current [4,5,6] — no overlap
+      const detectionRepo = createMockDetectionRepo({ window_message_ids: [1, 2, 3] });
+      const execute = meetingDetector(
+        createDeps(createMockOllama(TT, TT), { repo, agentRepo, detectionRepo }),
+      );
+      const result = await execute({ conversationId: "chat-1" });
+
+      expect(agentRepo.send).toHaveBeenCalled();
+      expect(result.deduped).toBe(false);
+    });
+
+    it("deletes detection when agent send fails (rollback)", async () => {
+      const agentRepo = createMockAgentRepo(false);
+      const detectionRepo = createMockDetectionRepo(null);
+      const execute = meetingDetector(
+        createDeps(createMockOllama(TT, TT), { agentRepo, detectionRepo }),
+      );
+      await execute({ conversationId: "chat-1" });
+
+      // Insert was called (before send), then delete was called (rollback)
+      expect(detectionRepo.insertDetection).toHaveBeenCalled();
+      const insertedId = (detectionRepo.insertDetection as ReturnType<typeof vi.fn>).mock.results[0]
+        .value.id;
+      expect(detectionRepo.deleteDetection).toHaveBeenCalledWith(insertedId);
+    });
+
+    it("does not delete detection when agent send succeeds", async () => {
+      const agentRepo = createMockAgentRepo(true);
+      const detectionRepo = createMockDetectionRepo(null);
+      const execute = meetingDetector(
+        createDeps(createMockOllama(TT, TT), { agentRepo, detectionRepo }),
+      );
+      await execute({ conversationId: "chat-1" });
+
+      expect(detectionRepo.insertDetection).toHaveBeenCalled();
+      expect(detectionRepo.deleteDetection).not.toHaveBeenCalled();
+    });
+
+    it("does not insert detection when no meeting detected", async () => {
+      const detectionRepo = createMockDetectionRepo(null);
+      const execute = meetingDetector(createDeps(createMockOllama(FF, FF), { detectionRepo }));
+      await execute({ conversationId: "chat-1" });
+
+      expect(detectionRepo.insertDetection).not.toHaveBeenCalled();
+    });
+
+    it("dedup check runs before Ollama — overlapping window skips LLM calls", async () => {
+      const ollama = createMockOllama(TT, TT);
+      const detectionRepo = createMockDetectionRepo({ window_message_ids: [1, 2] });
+      const execute = meetingDetector(createDeps(ollama, { detectionRepo }));
+      await execute({ conversationId: "chat-1" });
+
+      expect(ollama.generate).not.toHaveBeenCalled();
     });
   });
 });

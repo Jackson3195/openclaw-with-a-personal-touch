@@ -5,9 +5,12 @@ import type { SQLInputValue } from "node:sqlite";
 // Accepted SQL parameter types (matches node:sqlite SQLInputValue)
 export type SqlParam = SQLInputValue;
 
+// Result shape from run() — mirrors node:sqlite StatementResultingChanges
+export type StatementResult = { lastInsertRowid: number | bigint; changes: number | bigint };
+
 // Generic prepared statement — consumers cast .all() results to their types
 export type PreparedStatement = {
-  run: (...params: SqlParam[]) => void;
+  run: (...params: SqlParam[]) => StatementResult;
   all: (...params: SqlParam[]) => unknown[];
 };
 
@@ -45,7 +48,7 @@ export class SqliteRepositoryImpl implements SqliteRepository {
     const stmt = this.db.prepare(sql);
     return {
       run: (...params: SqlParam[]) => {
-        stmt.run(...params);
+        return stmt.run(...params);
       },
       all: (...params: SqlParam[]) => stmt.all(...params) as unknown[],
     };

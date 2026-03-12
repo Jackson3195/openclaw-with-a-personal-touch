@@ -1,32 +1,34 @@
 import type { Detector } from "../interfaces/detector.ts";
 import type { AgentRepository } from "../repository/agent-repository.ts";
+import type { DetectionRepository } from "../repository/detection-repository.ts";
 import type { MessageRepository } from "../repository/message-repository.ts";
 import type { OllamaRepository } from "../repository/ollama-repository.ts";
-import type { EscalationAction, Logger, MeetingClassification, StoredMessage } from "../types.ts";
+import type { DetectionAction, Logger, MeetingClassification, StoredMessage } from "../types.ts";
 
 export type MeetingDetectorDeps = {
   messageRepo: MessageRepository;
   ollama: OllamaRepository;
   agentRepo: AgentRepository;
+  detectionRepo: DetectionRepository;
   logger: Logger;
 };
 
 export type MeetingDetectorResult = {
-  escalation: EscalationAction;
+  detection: DetectionAction;
   agentNotified: boolean;
   classifications: Array<MeetingClassification | null>;
+  deduped: boolean;
 };
 
 /**
  * Meeting detector command.
  * Queries the message repository for the last 20 messages, classifies via
  * multiple Ollama agents sequentially, and uses consensus logic to determine
- * the escalation action.
+ * the detection action.
  *
  * Consensus rules:
  * - Any null result → "none" (error = do nothing)
  * - Both T+T → "add_calendar_event"
- * - Exactly one T+T → "confirm_with_customer"
  * - All other combinations → "none"
  */
 export const meetingDetector: Detector<MeetingDetectorDeps, MeetingDetectorResult> = (deps) => {
@@ -139,11 +141,10 @@ ${conversation}`;
       .join("\n");
 
   /**
-   * Determine the escalation action based on consensus of classification results.
-   * Any null → "none"; both T+T → "add_calendar_event";
-   * exactly one T+T → "confirm_with_customer"; else → "none".
+   * Determine the detection action based on consensus of classification results.
+   * Any null → "none"; both T+T → "add_calendar_event"; else → "none".
    */
-  const determineEscalation = (results: Array<MeetingClassification | null>): EscalationAction => {
+  const determineDetection = (results: Array<MeetingClassification | null>): DetectionAction => {
     // Any null means an error occurred — do nothing
     if (results.some((r) => r === null)) return "none";
 
@@ -151,15 +152,19 @@ ${conversation}`;
     const ttCount = results.filter((r) => isTT(r!)).length;
 
     if (ttCount === results.length) return "add_calendar_event";
-    if (ttCount === 1) return "confirm_with_customer";
+    // Previously (pre-2868f06), exactly one T+T triggered "confirm_with_customer" which
+    // escalated to the main agent for user confirmation. Removed because disagreement
+    // escalations were noisy false positives — now only both-agree triggers a detection.
     return "none";
   };
 
   /**
    * Build the prompt sent to the main agent when both models agree (add calendar event).
    */
-  const buildCalendarAgentPrompt = (conversation: string): string =>
+  const buildCalendarAgentPrompt = (conversation: string, detectionId: number): string =>
     `Two independent classifiers have both confirmed that the following WhatsApp conversation contains arrangements to meet up in person.
+
+Detection ID: ${detectionId}
 
 Use the calendar-guard skill to process this as a calendar event.
 
@@ -167,20 +172,13 @@ Use the calendar-guard skill to process this as a calendar event.
 ${conversation}`;
 
   /**
-   * Build the prompt sent to the main agent when models disagree (confirm with customer).
+   * Check if any stored message IDs overlap with the current window.
+   * Any overlap = the original meeting context is still visible.
    */
-  const buildConfirmationAgentPrompt = (conversation: string, reasons: string[]): string =>
-    `A classifier has flagged the following WhatsApp conversation as potentially containing arrangements to meet up in person, but there is disagreement between models.
+  const hasOverlap = (storedIds: number[], currentIds: Set<number>): boolean =>
+    storedIds.some((id) => currentIds.has(id));
 
-Model reasons:
-${reasons.map((r) => `- ${r}`).join("\n")}
-
-Use the calendar-guard skill to review the conversation and confirm whether a calendar event should be created.
-
---- Conversation ---
-${conversation}`;
-
-  const { messageRepo, ollama, agentRepo, logger } = deps;
+  const { messageRepo, ollama, agentRepo, detectionRepo, logger } = deps;
 
   return async (ctx) => {
     const { conversationId } = ctx;
@@ -188,6 +186,21 @@ ${conversation}`;
     logger.info(`meeting-detector: processing conversation ${conversationId}`);
 
     const messages = messageRepo.getConversation(conversationId, { limit: CONTEXT_LIMIT });
+    const currentIds = new Set(messages.map((m) => m.id));
+
+    // Dedup: check if the current window overlaps with the last detection.
+    // If so, skip entirely (no Ollama calls) to avoid duplicate detections.
+    const lastDetection = detectionRepo.getLastDetection(conversationId);
+    if (lastDetection && hasOverlap(lastDetection.window_message_ids, currentIds)) {
+      logger.info(`meeting-detector: dedup skip for ${conversationId}`);
+      return {
+        detection: "none" as DetectionAction,
+        agentNotified: false,
+        classifications: [],
+        deduped: true,
+      };
+    }
+
     const conversation = formatConversation(messages);
 
     // Run agents sequentially — each gets its own prompt and model
@@ -206,37 +219,36 @@ ${conversation}`;
       );
     }
 
-    const escalation = determineEscalation(classifications);
+    const detection = determineDetection(classifications);
 
-    // No escalation — log and return
-    if (escalation === "none") {
-      logger.info(`meeting-detector: no escalation for ${conversationId}`);
-      return { escalation, agentNotified: false, classifications };
+    // No detection — log and return
+    if (detection === "none") {
+      logger.info(`meeting-detector: no detection for ${conversationId}`);
+      return { detection, agentNotified: false, classifications, deduped: false };
     }
 
-    // Build the appropriate agent prompt based on escalation type
-    let agentPrompt: string;
-    if (escalation === "add_calendar_event") {
-      agentPrompt = buildCalendarAgentPrompt(conversation);
-      logger.info(`meeting-detector: escalating to add_calendar_event for ${conversationId}`);
-    } else {
-      // confirm_with_customer — include reasons from T+T models
-      const reasons = classifications
-        .filter(
-          (c): c is MeetingClassification =>
-            c !== null && c.has_agreed_to_meet && c.has_agreed_date,
-        )
-        .map((c) => c.reason);
-      agentPrompt = buildConfirmationAgentPrompt(conversation, reasons);
-      logger.info(`meeting-detector: escalating to confirm_with_customer for ${conversationId}`);
-    }
+    // Insert detection first to get the row ID for the agent prompt
+    const storedDetection = detectionRepo.insertDetection({
+      conversationId,
+      detectionType: detection,
+      windowMessageIds: [...currentIds],
+    });
+
+    // Both agents agreed — build calendar event prompt
+    const agentPrompt = buildCalendarAgentPrompt(conversation, storedDetection.id);
+    logger.info(`meeting-detector: detected add_calendar_event for ${conversationId}`);
 
     const agentResult = await agentRepo.send(agentPrompt);
 
+    // Rollback detection if agent send failed — allows retry on next cycle
+    if (!agentResult.success) {
+      detectionRepo.deleteDetection(storedDetection.id);
+    }
+
     logger.info(
-      `meeting-detector: escalation result for ${conversationId}: ${agentResult.success ? "success" : "failure"}`,
+      `meeting-detector: detection result for ${conversationId}: ${agentResult.success ? "success" : "failure"}`,
     );
 
-    return { escalation, agentNotified: agentResult.success, classifications };
+    return { detection, agentNotified: agentResult.success, classifications, deduped: false };
   };
 };
